@@ -1,0 +1,51 @@
+# --- DO NOT SHIP: Pokemon Competition Data (rights belong to Pokemon) ---
+# Per competition rules, these must NOT be redistributed publicly.
+EN_Card_Data.csv
+JP_Card_Data.csv
+cg/cg.dll
+cg/libcg.so
+sample_submission/
+episodes/
+episodes_*/
+deck_sample.csv
+
+# --- Backups and intermediate artifacts ---
+agent/weights_v*.npz
+selfplay/data*.npz
+*.npz.bak
+
+# --- Submission bundles (regenerable) ---
+submission/
+submission_*/
+submission_*.zip
+submission_*.tar.gz
+replay.html
+
+# --- Plans / scratch ---
+plans/
+review_cabt/
+_review_*/
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# --- IDE / OS ---
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# --- Logs / temp ---
+*.log
+/tmp/

@@ -6,7 +6,7 @@
 
 ## TL;DR
 
-I built a determinized Information-Set MCTS agent over the official engine's search API, with a small numpy-only value network at the leaves trained from cross-deck self-play. Instead of guessing the meta from card data alone, I **parsed all 6,533 episode JSONs from the public episode dataset** (13,064 deck observations), extracted top-agent decklists verbatim, and used them as both opponents and references. This drove **four deck pivots** — each documented with head-to-head data — taking the submission from a misguided Crustle wall (real-ladder 745) to a Hop's hybrid that climbed to **948 in one hour**. The same methodology produced concrete, transferable findings about which "paper meta" archetypes failed to translate to Kaggle (Dragapult ex: paper Tier 1, Kaggle 34% wr).
+I built a determinized Information-Set MCTS agent over the official engine's search API, with a small numpy-only value network at the leaves trained from cross-deck self-play. Instead of guessing the meta from card data alone, I **parsed 6,533 episode JSONs from the public episode dataset** (13,064 deck observations) and used the mined data to drive **four deck pivots** — each documented with head-to-head benchmarks. The final submission reached **1127.8 TrueSkill score with a 20W-7L (74%) record** over its first 27 ranked matches. The same methodology produced concrete, transferable findings about which "paper meta" archetypes failed to translate to Kaggle (Dragapult ex: paper Tier 1, Kaggle 34% wr).
 
 ---
 
@@ -93,7 +93,7 @@ Head-to-head MCTS gauntlet (n=14 per pair):
 | vs teaparty | 43% | 36% | +7 |
 | **Mean** | **77%** | 73% | +4 |
 
-**The tuned version beats the baseline 79% head-to-head.** On the real ladder the baseline alone reached **948 in its first hour** of play — a +200 swing from the Crustle build's 745, with the tuned version trending higher.
+**The tuned version beats the baseline 79% head-to-head.** On the real ladder the tuned version (hops_hybrid_v2) reached **1127.8 TrueSkill score with a 20W-7L (74%) record** over its first 27 ranked matches — a +400 swing above the median, climbing toward bronze medal range. The deck dominates Alakazam variants (4W-0L), Iono's Bellibolt (3W-0L), and the Riolu+Mega Lucario shell (2W-0L); its only structural weakness is the mirror match (1W-2L vs other Dunsparce+Hop's decks), where marathon games can exhaust the Dudunsparce "Run Away Draw" chain.
 
 ---
 

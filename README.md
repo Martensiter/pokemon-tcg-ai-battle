@@ -101,10 +101,3 @@ python tools/scan_episodes.py --top-agents "hiroingk,Kadoraba"
 [MIT](LICENSE) — applies to all code, decks, weights, and documentation in this
 repository. **Pokemon-distributed materials** (engine binary, card data, episode
 replays) are NOT covered by this license and are not redistributed here.
-
-## Acknowledgments
-
-- [@charlielockyer-rice/cabt-viewer](https://github.com/charlielockyer-rice/cabt-viewer)
-  (MIT) — set-code-to-image mapping ported from their card-art lookup
-- The Kaggle Pokemon TCG AI Battle Challenge community, whose published episode
-  replays made the episode-mining methodology possible

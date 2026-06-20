@@ -125,7 +125,7 @@ I shipped the Xerosic variant as a tertiary submission specifically because the 
 
 The full code, decks, episode-mining tools, and trained weights are available at the repository:
 
-`https://github.com/[username]/pokemon-tcg-ai-battle` *(replace before submission)*
+https://github.com/[henriquetakahiroito]/pokemon-tcg-ai-battle
 
 Quick reproduction:
 ```bash

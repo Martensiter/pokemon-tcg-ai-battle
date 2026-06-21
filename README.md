@@ -132,9 +132,15 @@ python selfplay/train_value.py --data selfplay/data_all.npz --out agent/weights.
 uv venv && uv pip install -e ".[dev,kaggle]"
 cp .env.example .env            # fill in KAGGLE_USERNAME / KAGGLE_KEY (never commit .env)
 uv run python -m collector --dry-run     # print resolved config, no network
+uv run python -m collector --self-test   # full pipeline on synthetic data — no creds/network (UAT)
 uv run python -m collector --once        # single discovery+collection pass
 uv run pytest tests/collector            # mock-only unit tests (no network, no engine, no torch)
 ```
+
+**For collaborators / UAT:** [docs/UAT.md](docs/UAT.md) is a step-by-step
+acceptance runbook (steps 1–3 need no credentials). [docs/ONBOARDING.md](docs/ONBOARDING.md)
+covers adding GitHub + Kaggle Dataset collaborators. CI
+(`.github/workflows/ci.yml`) runs the tests + offline self-test on every push/PR.
 
 ### Deploy on an ARM device (aarch64, no root/apt, nohup)
 

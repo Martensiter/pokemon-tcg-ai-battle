@@ -1,0 +1,44 @@
+name: collector-ci
+
+# Acceptance signal for the replay collector: runs on every push / PR so
+# collaborators see a green "build" before UAT. No Kaggle credentials, engine
+# binary, or torch required -- everything here is mock/offline.
+
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - "src/collector/**"
+      - "tests/collector/**"
+      - "pyproject.toml"
+      - ".github/workflows/ci.yml"
+  pull_request:
+    paths:
+      - "src/collector/**"
+      - "tests/collector/**"
+      - "pyproject.toml"
+      - ".github/workflows/ci.yml"
+  workflow_dispatch: {}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install (collector, numpy-only + dev)
+        run: uv pip install --system -e ".[dev]"
+
+      - name: Unit tests (mock-only, no network/engine/torch)
+        run: python -m pytest tests/collector -q
+
+      - name: Offline pipeline self-test (UAT smoke)
+        run: python -m collector --self-test

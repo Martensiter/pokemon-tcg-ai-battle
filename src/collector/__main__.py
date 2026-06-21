@@ -43,7 +43,20 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--keep-raw", action="store_true", help="also persist raw replay JSON")
     ap.add_argument("--dry-run", action="store_true",
                     help="print resolved config and exit (no network)")
+    ap.add_argument("--self-test", action="store_true",
+                    help="run the full pipeline offline on synthetic data (UAT; no creds/network)")
     args = ap.parse_args(argv)
+
+    if args.self_test:
+        from .selftest import run_selftest
+        log = get_logger("collector")
+        try:
+            summary = run_selftest()
+        except AssertionError as e:
+            log_kv(log, "self_test_failed", level=40, err=str(e))
+            return 1
+        log_kv(log, "self_test_ok", **summary)
+        return 0
 
     cfg = build_config(args)
     log = get_logger("collector", cfg.state_dir / "collector.log")

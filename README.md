@@ -121,10 +121,16 @@ Chunks are written as `data_collected_*.npz` with arrays `X (N, FEATURE_DIM)` an
 `y (N,)`, so they drop straight into the offline pipeline:
 
 ```bash
-# offline training box (torch lives here, NOT on the collector device)
-python selfplay/merge_data.py --glob "data_collected_*.npz" --out selfplay/data_all.npz
-python selfplay/train_value.py --data selfplay/data_all.npz --out agent/weights.npz
+# offline training box (torch lives here, NOT on the collector device).
+# tools/merge_collected.py bridges the collector's output dir into one dataset
+# (selfplay/merge_data.py only globs inside selfplay/); it validates against the
+# value net's FEATURE_DIM and is pure-numpy.
+python tools/merge_collected.py --src collector_data/value --out selfplay/data_collected_all.npz
+python selfplay/train_value.py --data selfplay/data_collected_all.npz --out agent/weights.npz
 ```
+
+(To blend collected ladder data with existing self-play sets, pass multiple
+sources: `--src collector_data/value selfplay/data.npz`.)
 
 ### Local run (uv, Python 3.11+)
 

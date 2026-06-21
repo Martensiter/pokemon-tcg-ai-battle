@@ -64,9 +64,9 @@ collect real ladder replays  ->  offline re-train value net  ->  re-submit (≤5
 Converted records must feed the **existing** training unchanged: value-net chunks
 are `data_collected_*.npz` with `X (N, FEATURE_DIM)` + `y (N,)`, labelled exactly
 like `selfplay/gen_data.py` (1.0 win / 0.5 draw / 0.0 loss for the to-move
-player), produced via `agent.features.extract`. They merge in with
-`selfplay/merge_data.py --glob "data_collected_*.npz"` and train via
-`selfplay/train_value.py`.
+player), produced via `agent.features.extract`. `tools/merge_collected.py`
+bridges the collector's output dir into one dataset (since `selfplay/merge_data.py`
+only globs inside `selfplay/`), which then trains via `selfplay/train_value.py`.
 
 ## Before committing
 

@@ -49,3 +49,14 @@ Thumbs.db
 # --- Logs / temp ---
 *.log
 /tmp/
+
+# --- Collector: secrets, raw data, intermediate outputs (NEVER commit) ---
+.env
+kaggle.json
+collector_data/
+collector_state/
+# but DO keep the Kaggle Dataset metadata template under collector/
+!collector/dataset-metadata.json
+*.npz.zip
+value_chunks.zip
+collector.out

@@ -1,0 +1,36 @@
+[project]
+name = "ptcg-replay-collector"
+version = "0.1.0"
+description = "Production replay collector for the Pokemon TCG AI Battle Challenge (feeds the existing value-net training pipeline)."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+# Pure-Python / numpy-only so it runs on a locked-down aarch64 ARM device.
+# NO torch and NO engine binary here -- training stays offline on another machine.
+dependencies = [
+    "numpy>=1.24",
+]
+
+[project.optional-dependencies]
+# Installed on dev / CI boxes; the official Kaggle client for real collection.
+kaggle = ["kaggle>=1.6"]
+dev = ["pytest>=7.4"]
+
+[project.scripts]
+ptcg-collector = "collector.__main__:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["collector*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests/collector"]
+python_files = ["test_*.py"]
+addopts = "-q"

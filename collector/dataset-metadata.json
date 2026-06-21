@@ -1,0 +1,11 @@
+{
+  "title": "PTCG Ladder Replays (collected)",
+  "id": "REPLACE_WITH/your-dataset-slug",
+  "licenses": [
+    {
+      "name": "other"
+    }
+  ],
+  "subtitle": "Converted value-net training records mined from real Kaggle ladder replays.",
+  "description": "Private dataset produced by src/collector. Contains value-net training chunks (data_collected_*.npz with arrays X=(N, FEATURE_DIM) and y=(N,)) plus small per-episode metadata (episodes_*.jsonl). Raw replays and Pokemon-distributed card/engine data are NOT included. Consumed offline by selfplay/merge_data.py + selfplay/train_value.py."
+}

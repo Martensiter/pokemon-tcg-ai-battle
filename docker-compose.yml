@@ -1,0 +1,27 @@
+# 24/7 replay collector. Bring up with:
+#   cp .env.example .env   # fill KAGGLE_USERNAME / KAGGLE_KEY (+ DATASET_SLUG for kaggle sink)
+#   docker compose up -d --build
+# One-off pass instead of the loop:
+#   docker compose run --rm collector --once
+services:
+  collector:
+    build: .
+    image: ptcg-collector:latest
+    container_name: ptcg-collector
+    restart: unless-stopped            # survive reboots / crashes
+    env_file: .env                     # credentials + COLLECTOR_* knobs (never committed)
+    environment:
+      # Pin output paths to the mounted volumes regardless of what .env sets
+      # (compose `environment` overrides `env_file`) so restarts stay resumable.
+      COLLECTOR_DATA_DIR: /data
+      COLLECTOR_STATE_DIR: /state
+    volumes:
+      - collector_data:/data           # npz chunks + metadata (canonical output)
+      - collector_state:/state         # manifest + logs -> idempotent, resumable
+    # ENTRYPOINT is `python -m collector`; no command => long-running loop.
+    # Append flags here to override, e.g. ["--once", "--rps", "0.2"].
+    stop_grace_period: 30s             # let SIGTERM flush the current chunk
+
+volumes:
+  collector_data:
+  collector_state:

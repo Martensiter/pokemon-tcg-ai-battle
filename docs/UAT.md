@@ -72,12 +72,17 @@ tracked in `collector_state/manifest.jsonl` (re-running skips fetched episodes).
 ## 5. Feed the existing training (offline box with torch)
 
 ```bash
-python selfplay/merge_data.py --glob "data_collected_*.npz" --out selfplay/data_all.npz
-python selfplay/train_value.py --data selfplay/data_all.npz --out agent/weights.npz
+# bridge collector chunks -> one dataset train_value.py reads (pure numpy):
+python tools/merge_collected.py --src collector_data/value --out selfplay/data_collected_all.npz
+python selfplay/train_value.py --data selfplay/data_collected_all.npz --out agent/weights.npz
 ```
 
-(Copy `collector_data/value/*.npz` next to `selfplay/`, or point `--glob` at the
-collector output directory.)
+`tools/merge_collected.py` accepts directories, globs, or explicit `.npz` files
+(e.g. `--src collector_data/value selfplay/data.npz` to blend in self-play data)
+and validates every chunk against the value net's `FEATURE_DIM`.
+
+✅ **Acceptance criterion:** the merge prints `merged <N> states (dim=32 ...)` and
+`train_value.py` runs and writes `agent/weights.npz` (needs torch on this box).
 
 ## Notes
 

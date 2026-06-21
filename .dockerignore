@@ -1,0 +1,36 @@
+# Keep the build context tiny and never ship secrets / data / big artifacts.
+.git
+.github
+.venv
+venv
+env
+__pycache__
+**/__pycache__
+*.pyc
+.pytest_cache
+.mypy_cache
+.ruff_cache
+
+# secrets + collected data (must never enter an image)
+.env
+kaggle.json
+collector_data/
+collector_state/
+collector.out
+*.log
+
+# Pokemon-distributed / large / regenerable
+cg/*.so
+cg/*.dll
+EN_Card_Data.csv
+JP_Card_Data.csv
+submission*.zip
+submission*.tar.gz
+*.npz
+replay.html
+episodes/
+
+# tests / docs not needed at runtime
+tests/
+docs/
+plans/

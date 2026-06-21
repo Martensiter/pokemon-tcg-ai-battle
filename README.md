@@ -148,7 +148,20 @@ acceptance runbook (steps 1–3 need no credentials). [docs/ONBOARDING.md](docs/
 covers adding GitHub + Kaggle Dataset collaborators. CI
 (`.github/workflows/ci.yml`) runs the tests + offline self-test on every push/PR.
 
-### Deploy on an ARM device (aarch64, no root/apt, nohup)
+### Deploy as a 24/7 daemon
+
+No web server is involved — the collector is a long-running CLI process. Full
+guide (Docker, SwitchBot AI Hub feasibility, Raspberry Pi/systemd, Termux):
+**[docs/DEPLOY.md](docs/DEPLOY.md)**. Quickest path, any Docker host (multi-arch,
+incl. ARM):
+
+```bash
+cp .env.example .env                              # KAGGLE_USERNAME / KAGGLE_KEY
+docker compose run --rm collector --self-test     # offline acceptance, no creds
+docker compose up -d --build                       # 24/7 loop; survives reboots
+```
+
+#### Native on an ARM device (aarch64, no root/apt, nohup)
 
 The collector is pure-Python + numpy — no torch, no engine binary, no native
 build — so it runs on a locked-down aarch64 box:

@@ -113,6 +113,43 @@ journalctl --user -u ptcg-collector -f
 **No systemd (e.g. Termux):** `nohup uv run python -m collector >> collector.out 2>&1 &`
 and re-launch on boot (Termux:Boot, or a cron `@reboot`).
 
+## Calling from OpenClaw / on-device agents (remote control)
+
+OpenClaw runs on the same Hub as the collector, so a small local HTTP API lets it
+report status or trigger a pass — controllable from a chat app while you're out,
+without giving the agent raw shell access. Start it:
+
+```bash
+export COLLECTOR_API_TOKEN=$(openssl rand -hex 16)   # put this in .env too
+uv run python -m collector --serve                    # binds 127.0.0.1:8765
+```
+
+Routes (token via `Authorization: Bearer <token>`):
+
+```bash
+curl localhost:8765/health                                            # no auth
+curl -H "Authorization: Bearer $TOKEN" localhost:8765/status          # counts + last pass
+curl -X POST -H "Authorization: Bearer $TOKEN" localhost:8765/collect  # run ONE pass (409 if busy)
+```
+
+Register these in OpenClaw as HTTP tools (e.g. "collector_status" → GET /status,
+"collect_now" → POST /collect). Then *"how many battles have we collected?"* or
+*"collect now"* works from your phone via OpenClaw.
+
+**Two usage models:**
+
+- **On-demand (simplest with OpenClaw):** run only `--serve`; OpenClaw triggers
+  passes via `POST /collect` (on a schedule or on request). One process, one
+  consistent manifest.
+- **Always-on + status:** run the loop daemon (Option A/C) for continuous
+  collection and, if you also want the API, run `--serve` as a *separate*
+  read-only status endpoint (its `seen` count is a snapshot from its own start;
+  trigger passes from one place to avoid two writers racing the manifest).
+
+Security: keep `COLLECTOR_API_HOST=127.0.0.1` (default). Binding a non-loopback
+host is refused unless `COLLECTOR_API_TOKEN` is set. The API never needs public
+exposure — you reach it indirectly through OpenClaw's own remote channel.
+
 ## Updating
 
 ```bash

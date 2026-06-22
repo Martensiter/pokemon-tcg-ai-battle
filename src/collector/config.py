@@ -132,6 +132,12 @@ class CollectorConfig:
     sink: str = "local"
     dataset_slug: str = ""
 
+    # Optional local control API (`collector serve`) for on-device agents
+    # (e.g. OpenClaw). Bind to localhost by default; token guards it.
+    api_host: str = "127.0.0.1"
+    api_port: int = 8765
+    api_token: str = ""
+
     data_dir: Path = field(default_factory=lambda: _project_root() / "collector_data")
     state_dir: Path = field(default_factory=lambda: _project_root() / "collector_state")
 
@@ -162,6 +168,9 @@ class CollectorConfig:
             loop_interval=_env_float("COLLECTOR_LOOP_INTERVAL", 900.0),
             sink=os.environ.get("COLLECTOR_SINK", "local").strip().lower(),
             dataset_slug=os.environ.get("DATASET_SLUG", ""),
+            api_host=os.environ.get("COLLECTOR_API_HOST", "127.0.0.1"),
+            api_port=_env_int("COLLECTOR_API_PORT", 8765),
+            api_token=os.environ.get("COLLECTOR_API_TOKEN", ""),
             data_dir=data_dir,
             state_dir=state_dir,
         )
@@ -178,7 +187,7 @@ class CollectorConfig:
         out: dict[str, object] = {}
         for f in fields(self):
             val = getattr(self, f.name)
-            if f.name in ("kaggle_key",):
+            if f.name in ("kaggle_key", "api_token"):
                 val = "***" if val else ""
             elif f.name == "kaggle_username":
                 val = (val[:2] + "***") if val else ""

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 import urllib.error
 import urllib.request
 
@@ -51,14 +52,46 @@ def _post(port, path, token=None):
         return r.status, json.loads(r.read())
 
 
+def _wait_idle(port, token, timeout=10.0):
+    """Poll /status until a background pass finishes (or time out)."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        _, st = _get(port, "/status", token=token)
+        if not st["pass_in_progress"] and st.get("last_pass") is not None:
+            return st
+        time.sleep(0.05)
+    raise AssertionError("pass did not finish in time")
+
+
 def test_control_server_status_and_collect_units(tmp_path):
     ctrl = _ctrl(tmp_path)
     st = ctrl.status()
     assert st["seen"] == 0 and st["pass_in_progress"] is False
-    code, body = ctrl.collect_once()
-    assert code == 200 and body["ok"] is True
+    # synchronous helper (used by programmatic callers / this unit test)
+    body = ctrl.collect_once()
+    assert body["ok"] is True
     assert body["converted_rows"] == 2 * 2 * 4
     assert ctrl.status()["seen"] == 4
+
+
+def test_start_collect_is_async(tmp_path):
+    ctrl = _ctrl(tmp_path)
+    code, body = ctrl.start_collect()
+    assert code == 202 and body["status"] == "started"
+    # eventually completes and records the result
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline and ctrl.pass_in_progress:
+        time.sleep(0.02)
+    assert ctrl._last_result and ctrl._last_result["converted_rows"] == 16
+    # a second concurrent start while busy would 409 (simulate by holding the flag)
+    with ctrl._guard:
+        ctrl.pass_in_progress = True
+    try:
+        code2, body2 = ctrl.start_collect()
+        assert code2 == 409 and body2["status"] == "busy"
+    finally:
+        with ctrl._guard:
+            ctrl.pass_in_progress = False
 
 
 def test_health_needs_no_auth(tmp_path):
@@ -90,10 +123,10 @@ def test_collect_over_http(tmp_path):
     httpd, port = _serve(_ctrl(tmp_path, token="secret"))
     try:
         code, body = _post(port, "/collect", token="secret")
-        assert code == 200 and body["converted_rows"] == 16
-        # status now reflects the collected episodes
-        _, st = _get(port, "/status", token="secret")
+        assert code == 202 and body["status"] == "started"   # async: returns immediately
+        st = _wait_idle(port, "secret")                       # poll until done
         assert st["seen"] == 4
+        assert st["last_pass"]["converted_rows"] == 16
     finally:
         httpd.shutdown()
 

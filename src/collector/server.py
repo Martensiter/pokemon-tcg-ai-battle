@@ -12,8 +12,10 @@ refused.
 
 Routes:
   * ``GET  /health``  -> ``{"ok": true}``                  (no auth; liveness)
-  * ``GET  /status``  -> manifest counts + last-pass summary
-  * ``POST /collect`` -> run ONE discovery+collection pass; 409 if one is running
+  * ``GET  /status``  -> manifest counts + ``pass_in_progress`` + last-pass result
+  * ``POST /collect`` -> start ONE pass in the background; returns ``202
+        {"status": "started"}`` immediately (so a chat tool call never blocks),
+        or ``409`` if a pass is already running. Poll ``/status`` for progress.
 """
 from __future__ import annotations
 
@@ -28,7 +30,7 @@ from .logutil import get_logger, log_kv
 
 
 class ControlServer:
-    """Wraps a :class:`Collector` and serializes on-demand passes under a lock."""
+    """Wraps a :class:`Collector`; runs passes in a background thread (one at a time)."""
 
     def __init__(self, config: CollectorConfig, collector: Collector | None = None,
                  token: str | None = None, logger: Any | None = None):
@@ -36,12 +38,13 @@ class ControlServer:
         self.log = logger or get_logger("collector", config.state_dir / "collector.log")
         self.collector = collector or Collector(config, logger=self.log)
         self.token = token or config.api_token or None
-        self._lock = threading.Lock()
+        self._guard = threading.Lock()      # protects pass_in_progress
         self.pass_in_progress = False
+        self._last_result: dict[str, Any] | None = None
 
     def status(self) -> dict[str, Any]:
         m = self.collector.manifest
-        return {
+        out: dict[str, Any] = {
             "competition": self.cfg.competition,
             "sink": self.cfg.sink,
             "seen": m.seen_count,
@@ -49,19 +52,41 @@ class ControlServer:
             "pass_in_progress": self.pass_in_progress,
             "has_credentials": self.cfg.has_credentials(),
         }
+        if self._last_result is not None:
+            out["last_pass"] = self._last_result
+        return out
 
-    def collect_once(self) -> tuple[int, dict[str, Any]]:
-        """Run one pass. Returns (http_status, body). 409 if already running."""
-        if not self._lock.acquire(blocking=False):
-            return 409, {"error": "busy", "pass_in_progress": True}
+    def _run_pass(self) -> dict[str, Any]:
+        """Run one pass synchronously and record the result. Never raises."""
         try:
-            self.pass_in_progress = True
             stats = self.collector.run_once()
-            return 200, {"ok": True, **stats.as_kv(),
-                         "seen_total": self.collector.manifest.seen_count}
+            result = {"ok": True, **stats.as_kv(),
+                      "seen_total": self.collector.manifest.seen_count}
+        except Exception as e:  # noqa: BLE001  (keep the server alive)
+            log_kv(self.log, "collect_error", level=40, err=f"{type(e).__name__}: {e}")
+            result = {"ok": False, "error": f"{type(e).__name__}: {e}"}
         finally:
-            self.pass_in_progress = False
-            self._lock.release()
+            with self._guard:
+                self.pass_in_progress = False
+        self._last_result = result
+        return result
+
+    def collect_once(self) -> dict[str, Any]:
+        """Run one pass synchronously (programmatic / tests). Returns the result."""
+        with self._guard:
+            if self.pass_in_progress:
+                return {"ok": False, "error": "busy", "pass_in_progress": True}
+            self.pass_in_progress = True
+        return self._run_pass()
+
+    def start_collect(self) -> tuple[int, dict[str, Any]]:
+        """Kick off a pass in the background. Returns (202, started) or (409, busy)."""
+        with self._guard:
+            if self.pass_in_progress:
+                return 409, {"status": "busy", "pass_in_progress": True}
+            self.pass_in_progress = True
+        threading.Thread(target=self._run_pass, name="collector-pass", daemon=True).start()
+        return 202, {"status": "started"}
 
 
 def _make_handler(ctrl: ControlServer):
@@ -106,7 +131,7 @@ def _make_handler(ctrl: ControlServer):
                 self._send(401, {"error": "unauthorized"})
                 return
             if self.path == "/collect":
-                code, body = ctrl.collect_once()
+                code, body = ctrl.start_collect()
                 self._send(code, body)
             else:
                 self._send(404, {"error": "not found"})

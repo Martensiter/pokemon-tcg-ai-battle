@@ -128,13 +128,19 @@ Routes (token via `Authorization: Bearer <token>`):
 
 ```bash
 curl localhost:8765/health                                            # no auth
-curl -H "Authorization: Bearer $TOKEN" localhost:8765/status          # counts + last pass
-curl -X POST -H "Authorization: Bearer $TOKEN" localhost:8765/collect  # run ONE pass (409 if busy)
+curl -H "Authorization: Bearer $TOKEN" localhost:8765/status          # counts + pass_in_progress + last_pass
+curl -X POST -H "Authorization: Bearer $TOKEN" localhost:8765/collect  # -> 202 {"status":"started"} (409 if busy)
 ```
+
+`POST /collect` is **asynchronous**: it starts one pass in the background and
+returns `202 {"status": "started"}` immediately, so a chat-tool call never hangs
+waiting for a rate-limited pass. Poll `GET /status` for `pass_in_progress` and the
+`last_pass` summary (`converted_rows`, `seen_total`, …).
 
 Register these in OpenClaw as HTTP tools (e.g. "collector_status" → GET /status,
 "collect_now" → POST /collect). Then *"how many battles have we collected?"* or
-*"collect now"* works from your phone via OpenClaw.
+*"collect now"* works from your phone via OpenClaw — the trigger returns instantly
+and you ask for status when you want the result.
 
 **Two usage models:**
 

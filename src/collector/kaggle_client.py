@@ -5,18 +5,20 @@ Every call goes through the single :meth:`KaggleClient._run` seam (subprocess),
 which makes the whole client trivially mockable in tests: patch ``_run`` to feed
 canned stdout instead of hitting the network.
 
-Endpoints wrapped (command strings per the task spec):
-  * ``kaggle competitions leaderboard <comp> -s``      -> top submissions
-  * ``kaggle competitions submissions <comp>``         -> our/leader active agents
-  * ``kaggle competitions episodes <submission_id>``   -> episode ids
-  * ``kaggle competitions replay <episode_id>``        -> replay JSON
-  * ``kaggle competitions logs <episode_id> <idx>``    -> agent logs
+Endpoints wrapped (verified against Kaggle CLI simulation-competition docs):
+  * ``kaggle competitions leaderboard <comp> -s --csv``   -> top submissions (CSV)
+  * ``kaggle competitions submissions <comp> --csv``      -> active agents (CSV)
+  * ``kaggle competitions episodes <submission_id> --csv``-> episode rows (CSV)
+  * ``kaggle competitions replay <episode_id> -p <dir>``  -> downloads
+        ``episode-<id>-replay.json`` (NOT stdout)
+  * ``kaggle competitions logs <episode_id> <idx> -p <dir>`` -> downloads
+        ``episode-<id>-agent-<idx>-logs.json``
 
-NOTE (unconfirmed): the exact subcommand surface for ``episodes``/``replay`` may
-differ across Kaggle CLI versions / simulation-competition APIs. Command
-construction is centralised in the small ``_cmd_*`` helpers so it can be adapted
-in one place once verified against the live CLI. Parsing is defensive and never
-assumes a rigid schema.
+``replay``/``logs`` write a *file* (per the official docs) rather than printing to
+stdout, so we point ``-p`` at a controlled download dir, read the known filename,
+and delete it after parsing (the collector re-persists raw via the sink only when
+``keep_raw`` is set, so a 24/7 run never accumulates stray files). Parsing stays
+defensive and never assumes a rigid schema.
 """
 from __future__ import annotations
 
@@ -25,6 +27,7 @@ import io
 import json
 import os
 import subprocess
+from pathlib import Path
 from typing import Any, Callable, Optional
 
 from .config import CollectorConfig
@@ -73,6 +76,8 @@ class KaggleClient:
         import time as _time
         self._sleep = sleep or _time.sleep
         self._log = logger
+        # replay/logs download files here; cleaned up after each read.
+        self._dl_dir = Path(config.data_dir) / ".downloads"
 
     # --- subprocess seam --------------------------------------------------
     def _default_runner(self, args: list[str], timeout: float) -> tuple[int, str, str]:
@@ -138,10 +143,12 @@ class KaggleClient:
         return ["kaggle", "competitions", "episodes", str(submission_id), "--csv"]
 
     def _cmd_replay(self, episode_id: str) -> list[str]:
-        return ["kaggle", "competitions", "replay", str(episode_id)]
+        return ["kaggle", "competitions", "replay", str(episode_id),
+                "-p", str(self._dl_dir)]
 
     def _cmd_logs(self, episode_id: str, agent_index: int) -> list[str]:
-        return ["kaggle", "competitions", "logs", str(episode_id), str(agent_index)]
+        return ["kaggle", "competitions", "logs", str(episode_id), str(agent_index),
+                "-p", str(self._dl_dir)]
 
     # --- public API -------------------------------------------------------
     def leaderboard(self) -> list[dict[str, str]]:
@@ -166,37 +173,57 @@ class KaggleClient:
     def replay(self, episode_id: str) -> dict[str, Any]:
         """Fetch a replay and return it as a dict.
 
-        The CLI may print JSON to stdout or download a file; we handle both. A
-        non-JSON / empty body is a :class:`FatalError` for this episode (the
-        caller records it as failed and moves on -- it is not retried forever).
+        The CLI downloads ``episode-<id>-replay.json`` (we also accept JSON on
+        stdout for forward/back compat and tests). The downloaded file is deleted
+        after parsing. A non-JSON / empty result is a :class:`FatalError` for this
+        episode (the caller records it failed and moves on -- not retried forever).
         """
+        self._dl_dir.mkdir(parents=True, exist_ok=True)
         out = self._run(self._cmd_replay(episode_id))
         data = _maybe_json(out)
         if data is None:
-            # Some CLI versions write to a file named after the episode.
-            path = self._find_downloaded(str(episode_id))
+            path = self._find_downloaded(str(episode_id), suffix="replay")
             if path is not None:
                 try:
                     data = json.loads(path.read_text(encoding="utf-8"))
-                except Exception as e:  # noqa: BLE001
-                    raise FatalError(f"replay {episode_id}: unreadable download: {e}") from e
+                finally:
+                    path.unlink(missing_ok=True)  # don't accumulate raw files
         if not isinstance(data, (dict, list)):
-            raise FatalError(f"replay {episode_id}: no JSON payload")
+            raise FatalError(f"replay {episode_id}: no JSON payload (expected "
+                             f"{self._dl_dir}/episode-{episode_id}-replay.json)")
         return {"episode_id": episode_id, "replay": data}
 
     def logs(self, episode_id: str, agent_index: int) -> Any:
-        """Agent logs for one seat (JSON if parseable, else raw text)."""
+        """Agent logs for one seat (JSON if available, else raw text/None).
+
+        Downloads ``episode-<id>-agent-<idx>-logs.json``; falls back to stdout.
+        """
+        self._dl_dir.mkdir(parents=True, exist_ok=True)
         out = self._run(self._cmd_logs(episode_id, agent_index))
         data = _maybe_json(out)
-        return data if data is not None else out
+        if data is None:
+            path = self._find_downloaded(str(episode_id), suffix=f"agent-{agent_index}-logs")
+            if path is not None:
+                try:
+                    data = json.loads(path.read_text(encoding="utf-8"))
+                except Exception:  # noqa: BLE001  (logs are best-effort, not critical)
+                    data = path.read_text(encoding="utf-8")
+                finally:
+                    path.unlink(missing_ok=True)
+        return data if data is not None else (out or None)
 
-    def _find_downloaded(self, episode_id: str):
-        from pathlib import Path
-        cwd = Path.cwd()
-        for cand in (cwd / f"{episode_id}.json", cwd / f"{episode_id}",
-                     self.cfg.data_dir / f"{episode_id}.json"):
-            if cand.exists():
-                return cand
+    def _find_downloaded(self, episode_id: str, suffix: str):
+        """Locate a CLI-downloaded file ``episode-<id>-<suffix>.json``.
+
+        Checks the configured download dir first, then the CWD (some CLI versions
+        ignore ``-p`` / default to CWD). Tolerates legacy ``<id>.json`` names.
+        """
+        names = [f"episode-{episode_id}-{suffix}.json", f"{episode_id}.json", f"{episode_id}"]
+        for base in (self._dl_dir, Path.cwd()):
+            for nm in names:
+                cand = base / nm
+                if cand.exists():
+                    return cand
         return None
 
 

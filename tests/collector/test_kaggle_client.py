@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+import tempfile
+from pathlib import Path
 
 import pytest
 import conftest as cf
@@ -12,6 +14,8 @@ from collector.ratelimit import FatalError, RateLimiter
 
 
 def _client(runner, **over):
+    # Use a throwaway data_dir so replay/logs downloads never touch the repo.
+    over.setdefault("data_dir", Path(tempfile.mkdtemp(prefix="kclient_")))
     cfg = CollectorConfig(rps=0.0, max_retries=4, backoff_base=0.0, **over)
     # rps=0 -> no real sleep; backoff sleep is also stubbed below.
     return KaggleClient(cfg, runner=runner, limiter=RateLimiter(0.0),
@@ -104,6 +108,30 @@ def test_timeout_marker_is_retryable():
     c = _client(runner)
     out = c.replay("ep1")
     assert state["n"] == 2 and "visualize" in out["replay"]
+
+
+def test_replay_reads_downloaded_file_and_cleans_up():
+    """Real CLI writes episode-<id>-replay.json (no stdout); we read + delete it."""
+    blob = cf.make_episode_steps(winner=0)
+    eid = "98765432"
+    c = _client(lambda a, t: (0, "", ""))  # placeholder; replaced below
+    dl_file = c._dl_dir / f"episode-{eid}-replay.json"
+
+    def runner(args, timeout):
+        c._dl_dir.mkdir(parents=True, exist_ok=True)
+        dl_file.write_text(json.dumps(blob), encoding="utf-8")
+        return 0, "", ""          # CLI prints nothing; it downloads a file
+
+    c._runner = runner
+    out = c.replay(eid)
+    assert "steps" in out["replay"]
+    assert not dl_file.exists()    # cleaned up after parsing
+
+
+def test_replay_missing_file_is_fatal():
+    c = _client(lambda a, t: (0, "", ""))   # success exit, but no file, no stdout
+    with pytest.raises(FatalError):
+        c.replay("123")
 
 
 def test_episodes_csv_then_json_fallback():

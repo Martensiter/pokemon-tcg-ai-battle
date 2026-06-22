@@ -45,6 +45,10 @@ def main(argv: list[str] | None = None) -> int:
                     help="print resolved config and exit (no network)")
     ap.add_argument("--self-test", action="store_true",
                     help="run the full pipeline offline on synthetic data (UAT; no creds/network)")
+    ap.add_argument("--serve", action="store_true",
+                    help="run the local control API (GET /status, POST /collect) for on-device agents")
+    ap.add_argument("--host", default=None, help="control API bind host (default 127.0.0.1)")
+    ap.add_argument("--port", type=int, default=None, help="control API port (default 8765)")
     args = ap.parse_args(argv)
 
     if args.self_test:
@@ -69,6 +73,11 @@ def main(argv: list[str] | None = None) -> int:
         log_kv(log, "no_credentials",
                hint="set KAGGLE_USERNAME / KAGGLE_KEY in env or .env; running anyway "
                     "(will fail on real calls)")
+
+    if args.serve:
+        from .server import serve
+        serve(cfg, host=args.host, port=args.port, logger=log)
+        return 0
 
     collector = Collector(cfg, logger=log)
     if args.once:

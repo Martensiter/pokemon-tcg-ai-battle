@@ -161,6 +161,11 @@ docker compose run --rm collector --self-test     # offline acceptance, no creds
 docker compose up -d --build                       # 24/7 loop; survives reboots
 ```
 
+**On-device agents (e.g. OpenClaw on the SwitchBot AI Hub):** `collector --serve`
+exposes a localhost, token-guarded control API (`GET /status`, `POST /collect`)
+so an agent can report status or trigger a pass — drivable from a chat app while
+you're out, without raw shell access. See [docs/DEPLOY.md](docs/DEPLOY.md#calling-from-openclaw--on-device-agents-remote-control).
+
 #### Native on an ARM device (aarch64, no root/apt, nohup)
 
 The collector is pure-Python + numpy — no torch, no engine binary, no native

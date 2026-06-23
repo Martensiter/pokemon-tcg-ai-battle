@@ -76,8 +76,9 @@ class KaggleClient:
         import time as _time
         self._sleep = sleep or _time.sleep
         self._log = logger
-        # replay/logs download files here; cleaned up after each read.
-        self._dl_dir = Path(config.data_dir) / ".downloads"
+        # replay/logs download files here; cleaned up after each read. Lives under
+        # state_dir (not data_dir) so it never gets uploaded by the Kaggle sink.
+        self._dl_dir = Path(config.state_dir) / ".downloads"
 
     # --- subprocess seam --------------------------------------------------
     def _default_runner(self, args: list[str], timeout: float) -> tuple[int, str, str]:

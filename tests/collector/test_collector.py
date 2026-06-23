@@ -16,7 +16,8 @@ class FakeClient:
     def __init__(self, n_subs=2, n_eps=3, winner=0):
         self._subs = [{"submissionId": str(100 + i), "teamName": f"Team{i}"}
                       for i in range(n_subs)]
-        self._eps = {s["submissionId"]: [f"{s['submissionId']}-e{j}" for j in range(n_eps)]
+        # episode ids are numeric (Kaggle requires int for `replay`)
+        self._eps = {s["submissionId"]: [f"{s['submissionId']}{j:03d}" for j in range(n_eps)]
                      for s in self._subs}
         self.winner = winner
         self.replay_calls = 0
@@ -96,6 +97,24 @@ def test_resume_after_restart(tmp_path):
     assert stats.skipped == 6
     assert stats.converted_rows == 0
     assert calls_after_first == 6
+
+
+def test_list_episode_ids_filters_nonnumeric(tmp_path):
+    """Stray usage/header lines (non-int ids) must be dropped, dups removed."""
+    class MixedClient(FakeClient):
+        def episodes(self, submission_id):
+            return [
+                {"id": "123"},
+                {"id": "123"},                       # duplicate
+                {"id": 'Use "kaggle competitions replay <episode_id>"'},  # garbage
+                {"id": "  456 "},                    # whitespace, numeric
+                {"id": ""},                          # empty
+            ]
+
+    cfg = _cfg(tmp_path)
+    col = Collector(cfg, client=MixedClient(), sink=LocalSink(cfg.data_dir),
+                    manifest=Manifest(cfg.state_dir / "manifest.jsonl"))
+    assert col.list_episode_ids("100") == ["123", "456"]
 
 
 def test_metadata_written(tmp_path):

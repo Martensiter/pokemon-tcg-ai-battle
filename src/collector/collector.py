@@ -116,9 +116,15 @@ class Collector:
                    submission=submission_id, err=str(e)[:200])
             return []
         ids: list[str] = []
+        seen: set[str] = set()
         for row in rows:
             eid = _scan_id(row, ("episodeid", "episode", "id"))
-            if eid:
+            eid = eid.strip() if eid else ""
+            # Kaggle episode ids are integers; `kaggle competitions replay`
+            # rejects anything else. Filter defensively so a stray header/usage
+            # line from the CSV never gets passed as an id.
+            if eid.isdigit() and eid not in seen:
+                seen.add(eid)
                 ids.append(eid)
         if self.cfg.episodes_per_submission:
             ids = ids[: self.cfg.episodes_per_submission]

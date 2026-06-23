@@ -79,7 +79,8 @@ class _OfflineClient:
     def __init__(self, n_subs: int = 2, n_eps: int = 3):
         self._subs = [{"submissionId": str(900 + i), "teamName": f"Self{i}"}
                       for i in range(n_subs)]
-        self._eps = {s["submissionId"]: [f"{s['submissionId']}-e{j}" for j in range(n_eps)]
+        # numeric episode ids (Kaggle's `replay` requires an int)
+        self._eps = {s["submissionId"]: [f"{s['submissionId']}{j:02d}" for j in range(n_eps)]
                      for s in self._subs}
 
     def leaderboard(self): return list(self._subs)

@@ -62,10 +62,44 @@ def unwrap(blob: Any) -> dict[str, Any]:
     return {"_payload": blob, "_meta": {}}
 
 
-def extract_frames(payload: Any) -> list[dict[str, Any]]:
-    """Yield CABT ``visualize`` frames regardless of wrapper format.
+def _frames_from_steps(steps: list) -> list[dict[str, Any]]:
+    """Build frames from the Kaggle env timeline.
 
-    Mirrors ``tools/import_episodes._frames`` but hardened against partial data.
+    The real cabt replay is the Kaggle environment format: ``steps`` is a list of
+    timesteps, each a list of per-agent entries ``{action, observation, status,
+    ...}``. The agent that is to move carries the live ``observation`` with a
+    ``current`` (State) and ``select`` (SelectData) -- exactly the obs dict the
+    agent sees live. We turn each such observation into a frame
+    ``{current, select, logs}``; the inactive seat (``current``/``select`` None)
+    is naturally skipped downstream by :func:`iter_main_decisions`.
+    """
+    frames: list[dict[str, Any]] = []
+    for step in steps:
+        if not isinstance(step, list):
+            continue
+        for entry in step:
+            e = _as_dict(entry)
+            # Skip the non-acting seat (it may carry a stale ``current``); the
+            # acting seat is the one we want, identified by status / live select.
+            if str(e.get("status", "")).upper() == "INACTIVE":
+                continue
+            obs = e.get("observation")
+            if not isinstance(obs, dict):
+                continue
+            cur = obs.get("current")
+            if isinstance(cur, dict):
+                frames.append({"current": cur, "select": obs.get("select"),
+                               "logs": obs.get("logs")})
+    return frames
+
+
+def extract_frames(payload: Any) -> list[dict[str, Any]]:
+    """Yield board-state frames regardless of wrapper format.
+
+    Handles, in order: a top-level ``visualize`` array; a ``visualize`` array
+    embedded in the first agent observation; and the Kaggle env timeline where
+    each ``steps[i][seat].observation`` carries ``current``/``select`` (the real
+    cabt replay shape).
     """
     if isinstance(payload, dict):
         vis = payload.get("visualize")
@@ -83,6 +117,10 @@ def extract_frames(payload: Any) -> list[dict[str, Any]]:
                 return [f for f in obs["visualize"] if isinstance(f, dict)]
             if isinstance(obs, list):
                 return [f for f in obs if isinstance(f, dict)]
+            # Kaggle env timeline: frames live in each agent's observation.
+            frames = _frames_from_steps(steps)
+            if frames:
+                return frames
     if isinstance(payload, list):
         return [f for f in payload if isinstance(f, dict)]
     return []

@@ -89,3 +89,29 @@ def make_episode_steps(winner: int = 0, deck=None, agents=("alice", "bob")):
 def make_episode_visualize(winner: int = 0):
     """Lower-level wrapper: top-level visualize array."""
     return {"visualize": make_frames(n_main=4, winner=winner)}
+
+
+def make_episode_env_timeline(winner: int = 0, n_main: int = 4, deck=None):
+    """Real cabt/Kaggle env shape: board state in steps[i][seat].observation.
+
+    Each timestep is [seat0_entry, seat1_entry]; the active seat carries a live
+    observation with current+select, the inactive seat's observation is empty.
+    """
+    deck = deck or list(range(1, 61))
+    sel = {"context": 0, "type": 0, "minCount": 1, "maxCount": 1, "option": [{"type": 14}]}
+    steps = [[
+        {"action": deck, "status": "ACTIVE",
+         "observation": {"current": None, "select": None, "logs": []}},
+        {"action": deck, "status": "INACTIVE",
+         "observation": {"current": None, "select": None, "logs": []}},
+    ]]
+    for i in range(n_main):
+        me = i % 2
+        active = {"status": "ACTIVE",
+                  "observation": {"current": make_state(i + 1, me), "select": sel, "logs": []}}
+        inactive = {"status": "INACTIVE",
+                    "observation": {"current": None, "select": None, "logs": []}}
+        steps.append([active, inactive] if me == 0 else [inactive, active])
+    rewards = [1, 0] if winner == 0 else ([0, 1] if winner == 1 else [0, 0])
+    return {"info": {"Agents": [{"Name": "a"}, {"Name": "b"}]},
+            "rewards": rewards, "steps": steps}

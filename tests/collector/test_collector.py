@@ -117,6 +117,31 @@ def test_list_episode_ids_filters_nonnumeric(tmp_path):
     assert col.list_episode_ids("100") == ["123", "456"]
 
 
+def test_maybe_publish_only_with_new_chunk(tmp_path):
+    """Publish fires only when a pass wrote a chunk (avoids Kaggle version spam)."""
+    from collector.collector import PassStats
+
+    calls = []
+
+    class RecordingSink(LocalSink):
+        def publish(self, message):
+            calls.append(message)
+            return True
+
+    cfg = _cfg(tmp_path)
+    col = Collector(cfg, client=FakeClient(), sink=RecordingSink(cfg.data_dir),
+                    manifest=Manifest(cfg.state_dir / "manifest.jsonl"))
+
+    no_chunk = PassStats(chunks=0)
+    assert col._maybe_publish(no_chunk) is False
+    assert col._maybe_publish(None) is False
+    assert calls == []
+
+    with_chunk = PassStats(chunks=1, converted_rows=42)
+    assert col._maybe_publish(with_chunk) is True
+    assert len(calls) == 1 and "42 rows" in calls[0]
+
+
 def test_metadata_written(tmp_path):
     cfg = _cfg(tmp_path)
     col = Collector(cfg, client=FakeClient(), sink=LocalSink(cfg.data_dir),

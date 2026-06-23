@@ -49,6 +49,25 @@ def test_iter_main_decisions_count():
         assert state["result"] == -1
 
 
+def test_parse_env_timeline_real_shape():
+    """Real cabt shape: board state in steps[i][seat].observation.current/select."""
+    blob = cf.make_episode_env_timeline(winner=1, n_main=4)
+    ep = parse_episode(blob, episode_id="env1")
+    assert ep.ok
+    assert ep.winner == 1                      # from rewards [0,1]
+    decisions = list(iter_main_decisions(ep))
+    assert len(decisions) == 4                 # one MAIN per acting step
+    for state, me in decisions:
+        assert me in (0, 1) and state["result"] == -1
+
+
+def test_env_timeline_skips_deckselect_and_inactive():
+    blob = cf.make_episode_env_timeline(winner=0, n_main=2)
+    ep = parse_episode(blob)
+    # deck-select step (current None) + inactive seats must not become decisions
+    assert len(list(iter_main_decisions(ep))) == 2
+
+
 def test_non_main_context_excluded():
     frames = [cf.make_frame(turn=1, your_index=0, context=3)]  # SWITCH, not MAIN
     ep = parse_episode({"visualize": frames})

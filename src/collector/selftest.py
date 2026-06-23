@@ -47,29 +47,31 @@ def _state(turn: int, your_index: int, result: int = -1) -> dict[str, Any]:
     }
 
 
-def _frame(turn: int, your_index: int, result: int = -1, logs=None) -> dict[str, Any]:
-    return {
-        "current": _state(turn, your_index, result),
-        "logs": logs or [],
-        "select": {"context": 0, "type": 0, "minCount": 1, "maxCount": 1,
-                   "option": [{"type": 14}]},
-    }
-
-
 def _synthetic_replay(winner: int = 0) -> dict[str, Any]:
+    """Synthetic replay in the REAL Kaggle env shape (board state in each
+    steps[i][seat].observation.current/select), so the self-test exercises the
+    same extraction path production uses."""
     deck = list(range(1, 61))
-    frames = [_frame(i + 1, i % 2) for i in range(4)]
-    frames.append(_frame(5, 0, result=winner,
-                         logs=[{"type": 23, "result": winner, "reason": 1}]))
+    sel = {"context": 0, "type": 0, "minCount": 1, "maxCount": 1, "option": [{"type": 14}]}
+    # deck-selection step (no live state yet)
+    steps = [[
+        {"action": deck, "status": "ACTIVE",
+         "observation": {"current": None, "select": None, "logs": []}},
+        {"action": deck, "status": "INACTIVE",
+         "observation": {"current": None, "select": None, "logs": []}},
+    ]]
+    for i in range(4):  # 4 MAIN decisions, alternating seats
+        me = i % 2
+        active = {"status": "ACTIVE",
+                  "observation": {"current": _state(i + 1, me), "select": sel, "logs": []}}
+        inactive = {"status": "INACTIVE",
+                    "observation": {"current": None, "select": None, "logs": []}}
+        steps.append([active, inactive] if me == 0 else [inactive, active])
     rewards = [1, 0] if winner == 0 else ([0, 1] if winner == 1 else [0, 0])
     return {
         "info": {"Agents": [{"Name": "selftest_a"}, {"Name": "selftest_b"}]},
         "rewards": rewards,
-        "steps": [
-            [{"observation": {"visualize": frames}, "action": deck},
-             {"observation": {}, "action": deck}],
-            [{"action": deck}, {"action": deck}],
-        ],
+        "steps": steps,
     }
 
 

@@ -230,13 +230,23 @@ class Collector:
                 stats = None
             if self._stop:
                 break
-            # Publish to the canonical store once per pass (no-op for LocalSink).
-            try:
-                self.sink.publish(f"collector pass {time.strftime('%Y-%m-%d %H:%M:%S')}")
-            except Exception as e:  # noqa: BLE001
-                log_kv(self.log, "publish_error", level=logging.WARNING, err=str(e)[:160])
+            # Publish to the canonical store ONLY when this pass wrote a new chunk
+            # (no-op for LocalSink). Avoids spamming Kaggle Dataset versions every
+            # loop when there are no new episodes.
+            self._maybe_publish(stats)
             self._interruptible_sleep(self.cfg.loop_interval)
         log_kv(self.log, "collector_stop", seen_total=self.manifest.seen_count)
+
+    def _maybe_publish(self, stats: "PassStats | None") -> bool:
+        """Publish to the sink iff the pass produced a new chunk. Never raises."""
+        if stats is None or stats.chunks <= 0:
+            return False
+        try:
+            return bool(self.sink.publish(
+                f"collector pass {time.strftime('%Y-%m-%d %H:%M:%S')} (+{stats.converted_rows} rows)"))
+        except Exception as e:  # noqa: BLE001
+            log_kv(self.log, "publish_error", level=logging.WARNING, err=str(e)[:160])
+            return False
 
     # --- helpers ----------------------------------------------------------
     def _write_status(self, stats: PassStats) -> None:

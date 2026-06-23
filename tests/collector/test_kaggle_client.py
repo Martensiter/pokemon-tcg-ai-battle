@@ -14,8 +14,10 @@ from collector.ratelimit import FatalError, RateLimiter
 
 
 def _client(runner, **over):
-    # Use a throwaway data_dir so replay/logs downloads never touch the repo.
-    over.setdefault("data_dir", Path(tempfile.mkdtemp(prefix="kclient_")))
+    # Use throwaway data_dir/state_dir so downloads/manifest never touch the repo.
+    tmp = Path(tempfile.mkdtemp(prefix="kclient_"))
+    over.setdefault("data_dir", tmp / "data")
+    over.setdefault("state_dir", tmp / "state")
     cfg = CollectorConfig(rps=0.0, max_retries=4, backoff_base=0.0, **over)
     # rps=0 -> no real sleep; backoff sleep is also stubbed below.
     return KaggleClient(cfg, runner=runner, limiter=RateLimiter(0.0),

@@ -153,6 +153,11 @@ class Collector:
             return
 
         stats.fetched += 1
+        # Persist the raw replay BEFORE parsing: a replay we can't parse is exactly
+        # the one worth keeping (re-fetch is impossible once the submission drops
+        # off the leaderboard, and a parser gap may be fixed later).
+        if self.cfg.keep_raw:
+            self.sink.write_raw(episode_id, payload.get("replay"))
         ep = parse_episode(payload.get("replay"), episode_id=episode_id)
         if not ep.ok:
             self.manifest.record(episode_id, "empty", extra={"err": ep.error})
@@ -164,8 +169,6 @@ class Collector:
             rows = episode_to_records(ep, self._buf)
         if self.cfg.save_episode_meta:
             self._meta_buf.append(episode_metadata(ep))
-        if self.cfg.keep_raw:
-            self.sink.write_raw(episode_id, payload.get("replay"))
 
         self.manifest.record(episode_id, "converted" if rows else "empty", rows=rows)
         stats.converted_rows += rows

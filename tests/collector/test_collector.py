@@ -171,3 +171,20 @@ def test_keep_raw_optin(tmp_path):
     col.run_once()
     raws = list((cfg.data_dir / "raw").glob("*.json"))
     assert len(raws) == 1
+
+
+def test_keep_raw_persists_even_on_parse_failure(tmp_path):
+    """A replay we can't parse is the one most worth keeping (no re-fetch later)."""
+    class BadReplayClient(FakeClient):
+        def replay(self, episode_id):
+            self.replay_calls += 1
+            return {"episode_id": episode_id, "replay": {"unparseable": True}}
+
+    cfg = _cfg(tmp_path, keep_raw=True)
+    col = Collector(cfg, client=BadReplayClient(n_subs=1, n_eps=1),
+                    sink=LocalSink(cfg.data_dir),
+                    manifest=Manifest(cfg.state_dir / "manifest.jsonl"))
+    stats = col.run_once()
+    assert stats.converted_rows == 0 and stats.empty >= 1
+    raws = list((cfg.data_dir / "raw").glob("*.json"))
+    assert len(raws) == 1   # raw saved despite the parse failure

@@ -34,5 +34,9 @@ if [ -f "$ROOT/.env" ]; then
   set -a; . "$ROOT/.env"; set +a
 fi
 
+# Put the venv's bin on PATH so the collector's `kaggle` subprocess is found
+# (we exec the venv python directly, not via `uv run`).
+export PATH="$REPO/.venv/bin:$PATH"
+
 cd "$REPO"
 exec "$PY" "$@"

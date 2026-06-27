@@ -12,7 +12,7 @@ Kaggle「Pokémon TCG AI Battle」用の、**実ラダー対戦リプレイを24
 - ✅ **収集は本番稼働中**。SwitchBot AI Hub 上で OpenClaw cron が30分毎に収集、4:00 UTC に日次再学習。
 - ✅ 実データ **51エピソード / 5,642学習局面 / 生リプレイ51件** を取得済み。
 - ✅ データ＋候補weights＋**manifest** を **プライベート Kaggle Dataset** に自動公開（デバイス全損でも復元可）。
-- 🔜 残：①cronのdelivery=none化（掃除）②データ蓄積待ち ③検証/提出（=MacBookをengine機に）④外形監視の常設。
+- 🔜 残：①**初提出**（現行ベースラインを1回・人手/OAuth＝ボードに載せる）②cronのdelivery=none化 ③データ蓄積→検証→再提出。**監視は Kaggle Dataset の更新日を見るだけでOK**（専用監視は不要）。
 
 ---
 
@@ -90,7 +90,13 @@ cat ~/.openclaw/cron/jobs.json | python3 -m json.tool | grep -iE '"name"|every|r
 `run.sh` がこれを読んで venv/bin を PATH に通す（kaggle CLIサブプロセス用）。
 
 ### 3a. 監視・アラート（外形監視 ＝ 放置でも壊れたら気づく仕組み）
-収集は無人で回るので「**いつの間にか死んでいた**」を防ぐ監視が要る。判定材料は
+> **一番簡単な外形監視 ＝ Kaggle の Dataset ページの "updated" 日付を時々見るだけ。**
+> 日次 publish が生きていれば毎日進む。古いまま止まれば異常。**専用の監視cron/Actionsは作らなくてよい**
+> （CLI なら `kaggle datasets files ichitaro3/ptcg-ladder-replays` でも更新が見える）。
+> スマホからは **OpenClaw に「収集どう？」と聞けば `/status` が `age_seconds` を返す**（Hubが生きている限りのオンデマンド確認）。
+> 下の `ts` ベースの仕組みは「device全損まで自動で気づきたい」場合の“深掘り版”で、**必須ではない**。
+
+より厳密にやる場合の判定材料は
 `state/status.json` の **`ts`（最終成功時刻=unix秒）** と **`age_seconds`**（`/status` API側で算出）。
 
 ```bash
@@ -200,6 +206,14 @@ kaggle competitions submit -c pokemon-tcg-ai-battle \
 > ブラウザで `kaggle.com/competitions/pokemon-tcg-ai-battle/submit` から `submission_*.tar.gz` を**手動アップロード**。
 > （`datasets download` 側は逆に `kaggle<1.7` の legacy auth で通る — §4 参照。）
 
+> **提出方針（現時点の推奨）**：まず **現行ベースライン（`agent/weights.npz` ＋ `deck_cand_hops_hybrid_v2.csv`）を
+> 1回だけ提出してボードに載せる**のが正解。まだ誰も出していないので「在席」する価値が高く、実績~948の既知bundleで低リスク。
+> これは `kaggle auth login`（OAuth）かブラウザ手動アップロードの **人手1回**で済む（②③だけ実施＝検証スキップでも可、ベースラインは既知良）。
+> **ループからの自動提出は当面オフ**：理由は ①`competitions submit` が **OAuth 必須で無人化できない**、
+> ②候補modelはまだ baseline を超えない（データ少量で verify が FAIL ＝ 出しても無意味）。
+> データが数万局面貯まり verify が PASS し始めた時点で、「OAuthを通して自動提出にするか／人手のまま続けるか」を再判断する。
+> ＝ **「今は人手で1回出す」「自動化は条件が揃ってから」** が結論。
+
 - **どのデッキ？** 既定の本命は `deck_cand_hops_hybrid_v2.csv`（README「Final primary deck」/ 現提出 `submission_hops_hybrid_v2`）。
   `make_submission.py` の `--deck` 既定は `deck.csv`。どのデッキを選んでも、バンドル内では必ず `deck.csv` として載る。
 - **回数制限**：1日 **5回**（Simulation）。**しかも Team では5回はチーム共有**（§7参照）。だから自動提出はせず**人がGO**を出す運用。
@@ -209,14 +223,15 @@ kaggle competitions submit -c pokemon-tcg-ai-battle \
 ---
 
 ## 6. 残TODO（優先順）
-1. **cron delivery=none**（Control UIで両ジョブ編集）— エラーログ止め。収集自体は無影響。
-2. **データ蓄積を待つ**（放置でOK、新着エピソードが増える）。
-3. **MacBookをengine機化**（§4：Docker amd64 + libcg.so 配置 → `engine OK` 確認）。
-4. **外形監視の常設**（§3a）— `ts` ベースの staleness 通知を Hub外（engine機 or GitHub Actions schedule）に。
-5. データが貯まったら **初の実検証→（良ければ）初提出**（§5a）。
-6. 任意：OpenClaw に collector制御APIのツール登録（`--serve` 済み・`docs/DEPLOY.md`）。
-7. 任意：収集メタからデッキ/メタ勝率を出す分析ツール（未実装）。
-8. 任意：行動クローン用に生replayから (state,action) 抽出（生は keep_raw で保存済み＝将来可能）。
+1. **初提出（ボードに載せる）**：現行ベースラインを1回 submit（人手・OAuth/ブラウザ・§5a「提出方針」）。まだ誰も出していないので最優先・低リスク。
+2. **cron delivery=none**（Control UIで両ジョブ編集）— エラーログ止め。収集自体は無影響。
+3. **データ蓄積を待つ**（放置でOK、新着エピソードが増える）。
+4. **MacBookをengine機化**（§4：`libcg.dylib`→`cg/libcg.so` ＋ `xattr -d com.apple.quarantine` → `engine OK (native)`）。
+5. データが貯まったら **初の実検証→（良ければ）候補の再提出**（§5a）。継続改善はここから。自動提出化はこの時点で再判断。
+6. 外形監視は **Dataset の更新日を見るだけでOK**（専用監視cron/Actionsは不要・§3a）。
+7. 任意：OpenClaw に collector制御APIのツール登録（`--serve` 済み・`docs/DEPLOY.md`）。
+8. 任意：収集メタからデッキ/メタ勝率を出す分析ツール（未実装）。
+9. 任意：行動クローン用に生replayから (state,action) 抽出（生は keep_raw で保存済み＝将来可能）。
 
 ---
 

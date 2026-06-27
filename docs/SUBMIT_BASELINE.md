@@ -23,11 +23,23 @@ md5 agent/weights.npz   # 期待: ba2c1e2b797841676cae9a3c58ed10f1（baseline＝
 - コンペ slug は **`pokemon-tcg-ai-battle`**（長い方 `…-challenge-simulation` は別物・404）。
 
 ## 1) 提出物をパッケージ
+> **★最重要★ エンジン本体 `cg/libcg.so` を bundle に必ず同梱する。**
+> Kaggleの採点機はエンジンを用意してくれない。エージェントは起動時に `cg/libcg.so` を
+> `LoadLibrary` するので、無いと **`cannot open shared object file` で即クラッシュ＝Validation Episode failed**。
+> しかも採点機は **Linux x86_64** なので、Mac native 用に置いた `libcg.dylib`（＝Mach-O）を
+> そのまま固めると **arch違いでまた落ちる**。必ず **`sample_submission/cg/libcg.so`（Linux x86_64）** を渡す。
+
 ```bash
-python tools/make_submission.py --deck deck_cand_hops_hybrid_v2.csv --name hops_hybrid_v2
+# sample_submission.zip の Linux x86_64 libcg.so を --engine-so で明示（dylibではない！）
+python tools/make_submission.py --deck deck_cand_hops_hybrid_v2.csv --name hops_hybrid_v2 \
+  --engine-so /path/to/sample_submission/cg/libcg.so
+# zip を展開済みでなければ: unzip -o ~/Downloads/sample_submission.zip -d /tmp/ss
+#   --engine-so /tmp/ss/sample_submission/cg/libcg.so
 ```
-- 生成物：`submission_hops_hybrid_v2.tar.gz`（と `.zip`）。
-- ログに **`weights=yes`** が出ればOK（重みが同梱された証拠。`NO` なら `agent/weights.npz` が無い）。
+- ログに **`weights=yes engine=elf-x86_64`** が出れば正解。
+  - `engine=missing` → ビルドが**中断**される（同梱忘れを防ぐ安全装置）。`--engine-so` を渡す。
+  - `engine=mach-o-macos` / `elf-arm64` → **警告**。Kaggleで落ちる。Linux x86_64 の `.so` を渡し直す。
+- 念のため中身確認：`tar tzf submission_hops_hybrid_v2.tar.gz | grep cg/libcg.so` が1行出ること。
 - どのデッキを選んでも、bundle 内では必ず `deck.csv` という名前で載る（仕様）。
 
 ## 2)（任意・推奨）健全性チェック

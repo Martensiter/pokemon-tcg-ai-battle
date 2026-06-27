@@ -56,3 +56,16 @@ def test_summary_written(tmp_path):
     assert data["seen"] == 1
     assert data["counts"]["converted"] == 1
     assert data["foo"] == "bar"
+
+
+def test_summary_stamps_timestamp(tmp_path):
+    """status.json carries a unix `ts` heartbeat for external staleness checks."""
+    import json
+    import time
+    m = Manifest(tmp_path / "manifest.jsonl")
+    before = int(time.time())
+    out = tmp_path / "status.json"
+    m.write_summary(out)
+    data = json.loads(out.read_text())
+    assert isinstance(data["ts"], int)
+    assert data["ts"] >= before

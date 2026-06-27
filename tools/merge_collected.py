@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import glob
+import hashlib
 import os
 import sys
 from typing import Iterable
@@ -52,8 +53,20 @@ def find_chunks(srcs: Iterable[str], pattern: str) -> list[str]:
     return sorted(dict.fromkeys(os.path.abspath(f) for f in files))
 
 
+def _chunk_digest(X: np.ndarray, y: np.ndarray) -> str:
+    """Content hash of a chunk's arrays (shape-aware, dtype-normalised)."""
+    h = hashlib.sha1()
+    Xc = np.ascontiguousarray(X, dtype=np.float32)
+    yc = np.ascontiguousarray(y, dtype=np.float32)
+    h.update(str(Xc.shape).encode())
+    h.update(Xc.tobytes())
+    h.update(yc.tobytes())
+    return h.hexdigest()
+
+
 def merge(files: list[str], verbose: bool = True,
-          expected_dim: int | None = _DEFAULT_DIM) -> tuple[np.ndarray, np.ndarray]:
+          expected_dim: int | None = _DEFAULT_DIM,
+          dedup: bool = True) -> tuple[np.ndarray, np.ndarray]:
     """Concatenate ``X``/``y`` across chunks, validating a consistent feature dim.
 
     The canonical width is ``expected_dim`` (the value net's ``FEATURE_DIM`` by
@@ -61,10 +74,21 @@ def merge(files: list[str], verbose: bool = True,
     merge. If ``expected_dim`` is None it is taken from the first valid chunk.
     Empty/malformed chunks are skipped with a warning so one bad file never sinks
     a long collection run.
+
+    With ``dedup`` (default), chunks whose ``(X, y)`` content is byte-identical to
+    one already merged are skipped. This is deliberately **chunk-level**, not
+    row-level: row-level dedup would corrupt the value-net label distribution
+    (repeated board states across games are a real frequency signal the net
+    learns from). Identical *chunks*, though, are the same collected data counted
+    twice -- e.g. a chunk reachable under two ``--src`` paths, or a dataset that
+    already contains a self-play file you also pass in -- and double-counting them
+    only skews training. ``find_chunks`` dedups by path; this dedups by content.
     """
     Xs: list[np.ndarray] = []
     ys: list[np.ndarray] = []
     dim: int | None = expected_dim
+    seen_digests: set[str] = set()
+    dup_files = 0
     for f in files:
         try:
             d = np.load(f)
@@ -85,10 +109,20 @@ def merge(files: list[str], verbose: bool = True,
             if verbose:
                 print(f"  [skip] {os.path.basename(f)}: feature dim {X.shape[1]} != {dim}")
             continue
+        if dedup:
+            digest = _chunk_digest(X, y)
+            if digest in seen_digests:
+                dup_files += 1
+                if verbose:
+                    print(f"  [dup ] {os.path.basename(f)}: identical content already merged")
+                continue
+            seen_digests.add(digest)
         Xs.append(X.astype(np.float32))
         ys.append(y.astype(np.float32))
         if verbose:
             print(f"  {os.path.basename(f)}: {len(y)} states")
+    if verbose and dup_files:
+        print(f"  ({dup_files} duplicate chunk(s) skipped by content)")
     if not Xs:
         return np.zeros((0, dim or 0), np.float32), np.zeros((0,), np.float32)
     return np.concatenate(Xs), np.concatenate(ys)

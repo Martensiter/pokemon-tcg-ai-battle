@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+import time
 from collections import Counter
 from pathlib import Path
 from typing import Any, Optional
@@ -82,8 +83,15 @@ class Manifest:
         return dict(self._counts)
 
     def write_summary(self, path: str | os.PathLike[str], extra: Optional[dict[str, Any]] = None) -> None:
-        """Atomically write a small JSON status summary."""
-        summary: dict[str, Any] = {"seen": self.seen_count, "counts": self.counts()}
+        """Atomically write a small JSON status summary.
+
+        ``ts`` is the unix time this summary was written. The collector calls
+        this at the *end of every successful pass*, so on disk ``ts`` is the
+        last-success heartbeat external monitors watch for staleness (no update
+        in ~90 min => the collector is wedged/down). See ``docs/HANDOFF.md`` §6.
+        """
+        summary: dict[str, Any] = {"ts": int(time.time()),
+                                   "seen": self.seen_count, "counts": self.counts()}
         if extra:
             summary.update(extra)
         p = Path(path)

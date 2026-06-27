@@ -27,6 +27,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import sys
 import time
 from pathlib import Path
@@ -44,13 +45,52 @@ from collector.logutil import get_logger, log_kv              # noqa: E402
 from collector.sink import KaggleDatasetSink, LocalSink       # noqa: E402
 
 
+def _stage_state(data_dir: Path, state_dir: str | os.PathLike[str] | None,
+                 log) -> bool:
+    """Copy the collector's manifest/status into the upload dir for durability.
+
+    The manifest (``state/manifest.jsonl``) is the *only* record of which
+    episodes we've already processed; idempotency + crash-resume both rest on
+    it. It normally lives in ``state_dir``, OUTSIDE the published ``data_dir``,
+    so a totalled device would lose it -- and a fresh collector, re-fetching the
+    same episodes, would emit duplicate rows into the dataset. Copying it into
+    ``data_dir/state/`` makes it ride along in every Kaggle Dataset version, so
+    recovery is: download the dataset, restore ``state/manifest.jsonl`` to the
+    collector's ``state_dir``, and the collector skips everything already seen.
+    See ``docs/HANDOFF.md`` §4a (disaster recovery). Returns True if staged.
+    """
+    if not state_dir:
+        return False
+    src_dir = Path(state_dir)
+    dst_dir = data_dir / "state"
+    staged = False
+    try:
+        dst_dir.mkdir(parents=True, exist_ok=True)
+        for name in ("manifest.jsonl", "status.json"):
+            src = src_dir / name
+            if src.exists():
+                shutil.copy2(src, dst_dir / name)
+                staged = staged or name == "manifest.jsonl"
+    except Exception as e:  # noqa: BLE001  (durability is best-effort; never block publish)
+        log_kv(log, "stage_state_failed", level=30, err=f"{type(e).__name__}: {e}")
+        return False
+    if staged:
+        log_kv(log, "stage_state", manifest=str(dst_dir / "manifest.jsonl"))
+    return staged
+
+
 def run_pipeline(data_dir: str | os.PathLike[str], *, hidden: list[int],
                  epochs: int, min_rows: int, publish: bool, dataset_slug: str,
+                 state_dir: str | os.PathLike[str] | None = None,
                  logger=None) -> dict:
     """One pass: merge -> train -> write candidate weights -> (optional) publish.
 
     Returns a summary dict. Never raises on "not enough data yet" -- it logs and
     returns ``{"trained": False, ...}`` so the daily loop keeps going.
+
+    ``state_dir`` (the collector's manifest dir) is staged into the upload dir
+    before publishing so the manifest is captured in the Kaggle Dataset version
+    -- this is what makes a wiped device recover without duplicate-collecting.
     """
     log = logger or get_logger("pipeline")
     data_dir = Path(data_dir)
@@ -83,6 +123,8 @@ def run_pipeline(data_dir: str | os.PathLike[str], *, hidden: list[int],
 
     published = False
     if publish and dataset_slug:
+        # Capture the manifest in the dataset version (disaster recovery).
+        _stage_state(data_dir, state_dir, log)
         sink = KaggleDatasetSink(LocalSink(data_dir), dataset_slug, logger=log)
         msg = (f"daily {time.strftime('%Y-%m-%d %H:%M')}: {len(y)} rows, "
                f"val_acc={report['val_acc']}")
@@ -117,7 +159,8 @@ def main(argv: list[str] | None = None) -> int:
         try:
             return run_pipeline(args.data_dir, hidden=args.hidden, epochs=args.epochs,
                                 min_rows=args.min_rows, publish=args.publish,
-                                dataset_slug=args.dataset_slug, logger=log)
+                                dataset_slug=args.dataset_slug,
+                                state_dir=cfg.state_dir, logger=log)
         except Exception as e:  # noqa: BLE001  (never let the loop die)
             log_kv(log, "pipeline_error", level=40, err=f"{type(e).__name__}: {e}")
             return {"trained": False, "error": str(e)}

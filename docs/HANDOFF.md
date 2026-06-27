@@ -189,9 +189,12 @@ cp -r /tmp/ds/value "$R/data/"                              # 既存チャンク
 python tools/verify_candidate.py --new /tmp/cand.npz --promote
 #    → 内部で  cp /tmp/cand.npz agent/weights.npz  相当（PASS時のみ）
 
-# ② 提出物をパッケージ（agent/ 一式 = weights.npz 込み + 選んだデッキ を同梱）
-python tools/make_submission.py --deck deck_cand_hops_hybrid_v2.csv --name hops_hybrid_v2
-#    → submission_hops_hybrid_v2.tar.gz と .zip を生成（deck は中で deck.csv にリネームされる）
+# ② 提出物をパッケージ（agent/+weights.npz + デッキ + ★エンジン本体 cg/libcg.so★ を同梱）
+#    ★Kaggleはエンジンを用意しない＝libcg.so未同梱だと起動時クラッシュ。しかも Linux x86_64 必須
+#    （Mac native用 libcg.dylib を固めると arch違いで落ちる）。詳細: docs/SUBMIT_BASELINE.md
+python tools/make_submission.py --deck deck_cand_hops_hybrid_v2.csv --name hops_hybrid_v2 \
+  --engine-so /path/to/sample_submission/cg/libcg.so
+#    → ログに `weights=yes engine=elf-x86_64` が出れば正解（missing/mach-o/arm64 は中断or警告）
 
 # ③ 健全性チェック（任意・推奨）
 python tests/submission_test.py submission_hops_hybrid_v2
@@ -250,10 +253,11 @@ kaggle competitions submit -c pokemon-tcg-ai-battle \
 ## 8. ハマりどころ（学習済み・再発防止）
 - **Hubコンテナ揮発**：永続は `/home/node/.openclaw` のみ。ここ以外（/app, ~/.local, ~/.kaggle）は消える。
 - **OpenClaw承認壁**：CLIは `operator.read` のみ→cron操作は Control UI(=フル権限) かチャットから。初回は **BOOTSTRAP**（ペルソナ設定）を1回答えないとエージェントが動かない。
-- **エンジンは x86_64 Linux**：ARM(Hub)/macOS では不可。Docker amd64 で。
+- **エンジンは実機が必要**：**Linux x86_64 と macOS(arm64 native, `libcg.dylib`) は可**、**aarch64 Hub は不可**（§4）。検証・対戦はMacでnative実行（Docker不要）。
 - **episode_id は int 必須**／**replayはファイルDL**（stdoutでない）／**run.shはvenv/binをPATHに**（kaggle CLI）／**.envのKEYは実値**（日本語プレースホルダで latin-1 エラー）。
 - 実replayの形は **Kaggle env形式**：盤面は `steps[i][seat].observation.current/select`（`visualize`配列ではない）。
 - **manifestを戻す前に再収集しない**（§4a）。戻し損ね時の保険はチャンク内容dedupのみ。
+- **提出bundleに `cg/libcg.so`（Linux x86_64）を同梱必須**（2026-06-27 実測：未同梱で `Validation Episode failed` = 起動時 `cannot open shared object file`）。Kaggleはエンジンを用意しない。Mac native用の `libcg.dylib` を固めると arch 違いでまた落ちる。`make_submission.py --engine-so sample_submission/cg/libcg.so` で同梱＋arch検証（未同梱は中断）。
 
 ---
 

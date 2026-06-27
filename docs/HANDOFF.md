@@ -223,7 +223,7 @@ kaggle competitions submit -c pokemon-tcg-ai-battle \
 ---
 
 ## 6. 残TODO（優先順）
-1. **初提出（ボードに載せる）**：現行ベースラインを1回 submit（人手・OAuth/ブラウザ・§5a「提出方針」）。まだ誰も出していないので最優先・低リスク。
+1. **初提出（ボードに載せる）**：現行ベースラインを1回 submit（人手・OAuth/ブラウザ）。手順は **[`docs/SUBMIT_BASELINE.md`](SUBMIT_BASELINE.md)**（コピペ可）。まだ誰も出していないので最優先・低リスク。
 2. **cron delivery=none**（Control UIで両ジョブ編集）— エラーログ止め。収集自体は無影響。
 3. **データ蓄積を待つ**（放置でOK、新着エピソードが増える）。
 4. **MacBookをengine機化**（§4：`libcg.dylib`→`cg/libcg.so` ＋ `xattr -d com.apple.quarantine` → `engine OK (native)`）。
@@ -269,6 +269,7 @@ kaggle competitions submit -c pokemon-tcg-ai-battle \
 | `tools/make_submission.py` | 提出バンドル生成（agent/+deck→`submission_<name>.tar.gz`） |
 | `src/collector/server.py` | `--serve` 制御API（OpenClaw用 status/collect・`age_seconds`） |
 | `docs/HANDOFF_MACBOOK.md` | engine機（Mac native）の実測詳細・**§4矛盾時はこちらが正** |
+| `docs/SUBMIT_BASELINE.md` | 今すぐベースラインを提出する最短手順（コピペ可） |
 | `docs/DEPLOY.md` / `docs/UAT.md` / `docs/ONBOARDING.md` | 配備/受入/共有 |
 
 テスト：`uv run --extra dev pytest tests/collector`（91件、ネット/エンジン/torch不要）。CIあり（§10）。

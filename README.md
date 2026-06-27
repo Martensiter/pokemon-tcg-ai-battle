@@ -60,6 +60,15 @@ here due to competition redistribution rules:
    pip install numpy torch
    ```
 
+   > **Two toolchains live here — don't mix them.** The **agent / training /
+   > verification / submission** side (`agent/`, `selfplay/`, `tools/make_submission.py`,
+   > `tools/verify_candidate.py`, `cg/`) is **pip + Python 3.12 + torch + the engine
+   > binary** and needs x86_64. The **collector** side (`src/collector/`,
+   > `tools/daily_pipeline.py`, `tools/merge_collected.py`, `selfplay/train_value_np.py`)
+   > is **uv + Python 3.11+ + numpy-only** (no torch, no engine) so it runs on the ARM
+   > Hub: `uv venv && uv pip install -e ".[dev,kaggle]"`. Rule of thumb: *numpy-only ⇒
+   > collector; needs torch or `libcg.so` ⇒ agent.* See `docs/HANDOFF.md` §10.
+
 ## Reproduction
 
 ```bash

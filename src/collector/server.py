@@ -21,7 +21,9 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import Any, Optional
 
 from .collector import Collector
@@ -44,7 +46,9 @@ class ControlServer:
 
     def status(self) -> dict[str, Any]:
         m = self.collector.manifest
+        now = int(time.time())
         out: dict[str, Any] = {
+            "now": now,
             "competition": self.cfg.competition,
             "sink": self.cfg.sink,
             "seen": m.seen_count,
@@ -52,9 +56,32 @@ class ControlServer:
             "pass_in_progress": self.pass_in_progress,
             "has_credentials": self.cfg.has_credentials(),
         }
+        # Surface the on-disk last-success heartbeat. The collecting passes may be
+        # SEPARATE processes (cron `--once`) from this server, so the in-memory
+        # manifest is not the source of truth for "when did a pass last succeed";
+        # status.json (written at the end of every pass) is. `age_seconds` lets an
+        # external monitor alert on staleness with a single field.
+        disk = self._read_status_file()
+        if disk is not None:
+            ts = disk.get("ts")
+            if isinstance(ts, (int, float)):
+                out["last_success_ts"] = int(ts)
+                out["age_seconds"] = now - int(ts)
+            if "last_pass" in disk:
+                out["last_pass"] = disk["last_pass"]
         if self._last_result is not None:
             out["last_pass"] = self._last_result
         return out
+
+    def _read_status_file(self) -> dict[str, Any] | None:
+        """Best-effort read of the on-disk status.json (None if absent/corrupt)."""
+        try:
+            p = Path(self.cfg.state_dir) / "status.json"
+            if not p.exists():
+                return None
+            return json.loads(p.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001  (status must never break on a torn file)
+            return None
 
     def _run_pass(self) -> dict[str, Any]:
         """Run one pass synchronously and record the result. Never raises."""

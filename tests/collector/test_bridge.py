@@ -51,6 +51,33 @@ def test_merge_concatenates(tmp_path):
     assert y.sum() == 4.0  # four 1.0 labels
 
 
+def test_merge_dedups_identical_chunks_by_content(tmp_path):
+    """Byte-identical chunks (same data under two names) merge once, not twice."""
+    _write_chunk(tmp_path / "data_collected_a.npz", 5, label=1.0)
+    # an exact content copy under a different name (e.g. reachable via two --src)
+    _write_chunk(tmp_path / "data_collected_a_copy.npz", 5, label=1.0)
+    # a genuinely different chunk must still be kept
+    _write_chunk(tmp_path / "data_collected_b.npz", 3, label=0.0)
+    files = find_chunks([str(tmp_path)], "data_collected_*.npz")
+    assert len(files) == 3  # find_chunks dedups by path only; content copy survives
+    X, y = merge(files, verbose=False)
+    assert X.shape == (8, FEATURE_DIM)   # 5 (a, once) + 3 (b); the copy dropped
+    # opting out keeps every chunk (the double-count)
+    X2, _ = merge(files, verbose=False, dedup=False)
+    assert X2.shape == (13, FEATURE_DIM)
+
+
+def test_merge_keeps_legitimate_repeated_rows_within_chunk(tmp_path):
+    """Dedup is chunk-level: repeated identical rows inside ONE chunk are kept
+    (they are a real label-frequency signal, not a duplication bug)."""
+    X = np.ones((6, FEATURE_DIM), np.float32)   # 6 identical rows in one file
+    y = np.full((6,), 1.0, np.float32)
+    np.savez_compressed(tmp_path / "data_collected_rep.npz", X=X, y=y)
+    files = find_chunks([str(tmp_path)], "data_collected_*.npz")
+    Xm, ym = merge(files, verbose=False)
+    assert Xm.shape == (6, FEATURE_DIM)   # all 6 preserved
+
+
 def test_merge_skips_empty_and_mismatched(tmp_path):
     _write_chunk(tmp_path / "data_collected_good.npz", 5)
     np.savez_compressed(tmp_path / "data_collected_empty.npz",

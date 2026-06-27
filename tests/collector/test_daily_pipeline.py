@@ -11,7 +11,7 @@ import json
 import numpy as np
 
 from collector.selftest import run_selftest
-from tools.daily_pipeline import run_pipeline
+from tools.daily_pipeline import _stage_state, run_pipeline
 
 FEATURE_DIM = 32
 
@@ -49,3 +49,26 @@ def test_pipeline_publish_noop_without_slug(tmp_path):
     out = run_pipeline(tmp_path / "data", hidden=[64, 64], epochs=3, min_rows=1,
                        publish=True, dataset_slug="")    # publish requested, no slug
     assert out["trained"] is True and out["published"] is False
+
+
+def test_stage_state_copies_manifest_into_upload_dir(tmp_path):
+    """Disaster-recovery: the manifest is staged under data/state/ so it rides in
+    the published Kaggle Dataset version (restore -> no duplicate-collection)."""
+    import logging
+    run_selftest(workdir=tmp_path, n_subs=2, n_eps=2)   # writes state/manifest.jsonl
+    data_dir = tmp_path / "data"
+    state_dir = tmp_path / "state"
+    assert (state_dir / "manifest.jsonl").exists()
+
+    staged = _stage_state(data_dir, state_dir, logging.getLogger("t"))
+    assert staged is True
+    copied = data_dir / "state" / "manifest.jsonl"
+    assert copied.exists()
+    # content matches the source manifest exactly
+    assert copied.read_text() == (state_dir / "manifest.jsonl").read_text()
+
+
+def test_stage_state_noop_without_state_dir(tmp_path):
+    import logging
+    run_selftest(workdir=tmp_path, n_subs=1, n_eps=1)
+    assert _stage_state(tmp_path / "data", None, logging.getLogger("t")) is False

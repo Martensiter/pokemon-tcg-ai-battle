@@ -74,6 +74,20 @@ def test_control_server_status_and_collect_units(tmp_path):
     assert ctrl.status()["seen"] == 4
 
 
+def test_status_exposes_heartbeat_after_pass(tmp_path):
+    """/status surfaces `now` plus the on-disk last-success ts + age_seconds, so an
+    external monitor can alert on staleness without parsing logs."""
+    ctrl = _ctrl(tmp_path)
+    st0 = ctrl.status()
+    assert "now" in st0
+    assert "last_success_ts" not in st0          # no pass has run yet
+    ctrl.collect_once()                           # writes state/status.json with ts
+    st1 = ctrl.status()
+    assert st1["last_success_ts"] <= st1["now"]
+    assert st1["age_seconds"] >= 0
+    assert st1["age_seconds"] == st1["now"] - st1["last_success_ts"]
+
+
 def test_start_collect_is_async(tmp_path):
     ctrl = _ctrl(tmp_path)
     code, body = ctrl.start_collect()

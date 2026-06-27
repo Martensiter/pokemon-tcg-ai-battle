@@ -228,6 +228,7 @@ kaggle competitions submit -c pokemon-tcg-ai-battle \
 3. **データ蓄積を待つ**（放置でOK、新着エピソードが増える）。
 4. **MacBookをengine機化**（§4：`libcg.dylib`→`cg/libcg.so` ＋ `xattr -d com.apple.quarantine` → `engine OK (native)`）。
 5. データが貯まったら **初の実検証→（良ければ）候補の再提出**（§5a）。継続改善はここから。自動提出化はこの時点で再判断。
+   - 検証は **MacBookで自動化（cron/launchd）可能**：[`docs/MAC_AUTOMATION.md`](MAC_AUTOMATION.md)。データ量で自己ゲートするので今仕込んでも無害（提出はしない）。
 6. 外形監視は **Dataset の更新日を見るだけでOK**（専用監視cron/Actionsは不要・§3a）。
 7. 任意：OpenClaw に collector制御APIのツール登録（`--serve` 済み・`docs/DEPLOY.md`）。
 8. 任意：収集メタからデッキ/メタ勝率を出す分析ツール（未実装）。
@@ -270,6 +271,7 @@ kaggle competitions submit -c pokemon-tcg-ai-battle \
 | `src/collector/server.py` | `--serve` 制御API（OpenClaw用 status/collect・`age_seconds`） |
 | `docs/HANDOFF_MACBOOK.md` | engine機（Mac native）の実測詳細・**§4矛盾時はこちらが正** |
 | `docs/SUBMIT_BASELINE.md` | 今すぐベースラインを提出する最短手順（コピペ可） |
+| `docs/MAC_AUTOMATION.md` ＋ `tools/mac/verify_and_promote.sh` | MacBookで検証→昇格を自動化（自己ゲート・never-submit） |
 | `docs/DEPLOY.md` / `docs/UAT.md` / `docs/ONBOARDING.md` | 配備/受入/共有 |
 
 テスト：`uv run --extra dev pytest tests/collector`（91件、ネット/エンジン/torch不要）。CIあり（§10）。

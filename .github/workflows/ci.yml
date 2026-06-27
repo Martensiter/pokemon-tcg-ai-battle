@@ -34,8 +34,11 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
+      # setup-uv@v5 creates + activates a project venv (VIRTUAL_ENV + PATH persist
+      # across steps), so install INTO it -- no --system, which uv refuses on its
+      # own externally-managed interpreter. `python` below is the venv's python.
       - name: Install (collector, numpy-only + dev)
-        run: uv pip install --system -e ".[dev]"
+        run: uv pip install -e ".[dev]"
 
       - name: Unit tests (mock-only, no network/engine/torch)
         run: python -m pytest tests/collector -q

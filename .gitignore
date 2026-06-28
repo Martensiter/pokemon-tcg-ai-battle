@@ -11,6 +11,11 @@ deck_sample.csv
 
 # --- Backups and intermediate artifacts ---
 agent/weights_v*.npz
+# Distillation policy net: a local-only trained artifact (opt-in via POLICY_PUCT_C).
+# Keep it out of git until verified; make_submission still bundles a local copy.
+# Force-add (git add -f agent/policy.npz) only to ship a verified policy.
+agent/policy.npz
+policy_data*.npz
 selfplay/data*.npz
 *.npz.bak
 

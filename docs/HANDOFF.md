@@ -232,9 +232,13 @@ kaggle competitions submit -c pokemon-tcg-ai-battle \
 - **② config A/Bスイープ**（データ不要・Mac）：`tools/sweep_config.py --param DETERMINIZATIONS_PER_MOVE --values 8,12,16,24`。
   simsが足りないなら `DETERMINIZATIONS_PER_MOVE`/`ROLLOUT_DEPTH` を削って1手のsimsを増やす。`VALUE_NET_WEIGHT` も試す。良ければ `verify_candidate` で再確認→`agent/config.py`反映。
 - **③ value net 再学習**（本筋・長期）：収集→`daily_pipeline`→`verify_candidate`→再提出。数万局面で効く。
-- **④ 上位蒸留（behavioral cloning）**：上位replayの「選んだ手」を模倣する policyネット。**オフライン基盤は実装済み**
-  （`tools/extract_policy.py`→`selfplay/train_policy_np.py`。生replayは収集機が保存済み・engine/CSV/torch不要・winner手のみ）。
-  **agentへの統合（rollout方策/prior/直接模倣）＋engine検証は未実装＝次の大きい一手**。詳細は各ファイルのdocstring。
+- **④ 上位蒸留（behavioral cloning）**：上位replayの「選んだ手」を模倣する policyネットを **MCTSの root prior（PUCT）** に使う。
+  抽出→学習→**agent統合まで実装済み**。**既定OFF**（`POLICY_PUCT_C=0`＝従来UCB1と完全同一）。手順：
+  1. データ：`tools/extract_policy.py --src ds/raw --out policy_data.npz`（生replayは収集機が保存済み・engine/CSV不要・winner手のみ）
+  2. 学習：`selfplay/train_policy_np.py --data policy_data.npz --out agent/policy.npz`（grouped softmax CE。val_accが当て具合）
+  3. 検証（engine機）：`tools/sweep_config.py --param POLICY_PUCT_C --values 0,1,2,3 --games 8` ＝ **OFF(0) vs PUCT(1..3)** の自己対戦A/B
+  4. 良ければ `agent/config.py` の `POLICY_PUCT_C` を採用値に → `make_submission`（policy.npzは自動同梱）→ 提出
+  - `agent/policy.npz` は **gitignore**（未検証の方策を誤って載せない）。出す時だけ `git add -f` か、ローカルbundleで同梱。
 
 ---
 
@@ -287,6 +291,7 @@ kaggle competitions submit -c pokemon-tcg-ai-battle \
 | `tools/sweep_config.py` | 探索/評価configのA/Bスイープ（engine機・データ不要でスコア詰め） |
 | `src/collector/policy_extract.py` ＋ `tools/extract_policy.py` | 上位蒸留：生replay→(state,選択肢,選んだ手) policy records（engine/CSV不要） |
 | `selfplay/train_policy_np.py` | policyネットをnumpyで学習（grouped softmax CE → `policy.npz`） |
+| `agent/policy_net.py` ＋ `agent/policy_features.py` | policyネットのnumpy推論＋MCTS root PUCT prior（既定OFF・提出同梱） |
 | `tools/make_submission.py` | 提出バンドル生成（agent/+deck+`cg/libcg.so`→`submission_<name>.tar.gz`） |
 | `src/collector/server.py` | `--serve` 制御API（OpenClaw用 status/collect・`age_seconds`） |
 | `docs/HANDOFF_MACBOOK.md` | engine機（Mac native）の実測詳細・**§4矛盾時はこちらが正** |

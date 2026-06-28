@@ -35,35 +35,16 @@ if _ROOT not in sys.path:
 
 import numpy as np  # noqa: E402
 
-from agent.features import extract, FEATURE_DIM  # noqa: E402  (numpy-only, no engine)
+from agent.features import extract  # noqa: E402  (numpy-only, no engine)
+# Featurization lives in agent/ so it ships with the submission; re-exported here
+# (STATE_DIM/OPT_FEAT_DIM/OPTION_TYPE_DIM/featurize_option) for the data pipeline.
+from agent.policy_features import (  # noqa: E402,F401
+    OPT_FEAT_DIM, OPTION_TYPE_DIM, STATE_DIM, featurize_option,
+)
 
 from .parse import (  # noqa: E402
     MAIN_CONTEXT, _as_dict, _as_list, _as_int, extract_rewards, winner_from_rewards,
 )
-
-STATE_DIM = FEATURE_DIM
-# One-hot of the option ``type`` (OptionType has ~54 members and the competition
-# may append more mid-season, so bucket generously and clamp overflow).
-OPTION_TYPE_DIM = 64
-# + flags: has-area, has-attackId, has-index, playerIndex==me, normalized position
-OPT_FEAT_DIM = OPTION_TYPE_DIM + 5
-
-
-def featurize_option(o: dict, idx: int, n: int, me: int) -> np.ndarray:
-    """Engine/DB-free feature vector for one option (varies across a group)."""
-    v = np.zeros(OPT_FEAT_DIM, dtype=np.float32)
-    o = _as_dict(o)
-    t = o.get("type")
-    if isinstance(t, int):
-        v[min(max(t, 0), OPTION_TYPE_DIM - 1)] = 1.0
-    base = OPTION_TYPE_DIM
-    v[base + 0] = 1.0 if o.get("area") is not None else 0.0
-    v[base + 1] = 1.0 if o.get("attackId") is not None else 0.0
-    v[base + 2] = 1.0 if o.get("index") is not None else 0.0
-    pi = o.get("playerIndex")
-    v[base + 3] = 1.0 if (pi is not None and pi == me) else 0.0
-    v[base + 4] = (idx / n) if n else 0.0
-    return v
 
 
 def _single_index(action: Any, n: int) -> int | None:

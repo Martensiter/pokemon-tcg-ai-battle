@@ -79,6 +79,42 @@ def _stage_state(data_dir: Path, state_dir: str | os.PathLike[str] | None,
     return staged
 
 
+def _value_xy(data_dir: Path, log):
+    """Value (X, y) at the CURRENT FEATURE_DIM, plus (source, n_sources).
+
+    Prefer re-extracting from the durable raw replay archive. The incremental
+    ``data_collected_*.npz`` chunks are frozen at whatever ``FEATURE_DIM`` was
+    live when written, so after a feature change (e.g. 32 -> 124) merge()'s dim
+    guard silently DROPS them and the trainer would shrink to only new data.
+    Re-extracting from ``raw/`` keeps ALL history at the live dim (raw is small
+    and kept via COLLECTOR_KEEP_RAW). Fall back to the chunks if no raw is kept.
+    """
+    raw_dir = data_dir / "raw"
+    raws = sorted(raw_dir.glob("*.json")) if raw_dir.is_dir() else []
+    if raws:
+        from collector.parse import parse_episode               # noqa: E402
+        from collector.convert import ValueRecords, episode_to_records  # noqa: E402
+        rec = ValueRecords()
+        used = 0
+        for f in raws:
+            try:
+                blob = json.load(open(f, encoding="utf-8"))
+            except Exception:  # noqa: BLE001  (skip an unreadable replay)
+                continue
+            ep = parse_episode(blob, episode_id=f.stem)
+            if ep.ok and episode_to_records(ep, rec):
+                used += 1
+        X, y = rec.arrays()
+        if len(y):
+            log_kv(log, "value_source", src="raw", replays=len(raws), used=used,
+                   rows=int(len(y)), dim=int(X.shape[1]))
+            return X, y, "raw", used
+    chunks = find_chunks([str(data_dir / "value")], "data_collected_*.npz")
+    X, y = merge(chunks, verbose=False)
+    log_kv(log, "value_source", src="chunks", chunks=len(chunks), rows=int(len(y)))
+    return X, y, "chunks", len(chunks)
+
+
 def run_pipeline(data_dir: str | os.PathLike[str], *, hidden: list[int],
                  epochs: int, min_rows: int, publish: bool, dataset_slug: str,
                  state_dir: str | os.PathLike[str] | None = None,
@@ -94,10 +130,8 @@ def run_pipeline(data_dir: str | os.PathLike[str], *, hidden: list[int],
     """
     log = logger or get_logger("pipeline")
     data_dir = Path(data_dir)
-    value_dir = data_dir / "value"
 
-    chunks = find_chunks([str(value_dir)], "data_collected_*.npz")
-    X, y = merge(chunks, verbose=False)
+    X, y, value_src, n_sources = _value_xy(data_dir, log)
     if len(y) < min_rows:
         log_kv(log, "pipeline_skip", reason="insufficient_rows", rows=int(len(y)),
                min_rows=min_rows)
@@ -112,7 +146,8 @@ def run_pipeline(data_dir: str | os.PathLike[str], *, hidden: list[int],
     report = {
         "ts": int(time.time()),
         "rows": int(len(y)),
-        "chunks": len(chunks),
+        "value_src": value_src,
+        "sources": n_sources,
         "hidden": list(hidden),
         "val_loss": round(metrics["val_loss"], 4),
         "val_acc": round(metrics["val_acc"], 4),

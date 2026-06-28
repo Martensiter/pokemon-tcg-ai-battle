@@ -21,6 +21,8 @@
 - **提出は人間ゲート**：`competitions submit` が OAuth必須で無人化不可＋回帰を自動で出したくない。
 - **監視 = Dataset の "updated" 日付を見るだけ**（専用cron/Actionsは不要。Hub全損まで自動検知したい時だけ `status.json` の `ts`）。
 - **改善ループの正準形**：collect → offline retrain → verify → resubmit（**オンライン学習ではない**）。
+- **作業分担（2026-06時点）**：**Mac＝精度向上（engine依存の実験。pushは"確定変更"のみ＝Macが正）／このHub側＝自動化（Macの確定変更を24/7パイプラインに反映）**。
+  順番：Macで精度向上 → 確定したらHub自動化へ反映。同一ブランチに2エージェントが触るので**push衝突に注意**（取り込んで上に乗せ直す）。
 
 ---
 
@@ -35,6 +37,7 @@
 | D5 | policy 統合は MCTS root の PUCT prior | netの学習形（root単一選択のP）に最も素直・既定OFFで安全 | rollout方策/直接模倣の方が強い可能性（未検証） |
 | D6 | policy.npz は gitignore | 未検証の方策を誤ってshipしない | 検証後に `git add -f` で意図的にship |
 | D7 | 提出bundleにエンジンを同梱（Linux x86_64 .so） | Kaggleはエンジンを用意しない（実測） | — |
+| D8 | 日次再学習は**生replayから再抽出**（dim凍結chunk依存をやめる） | Macが `FEATURE_DIM` を変える度（32→124）に過去chunkがdim不一致で無言で捨てられるため。rawから現dimで再生成＝Macの精度変更に自動追従（Hub反映の第1号） | rawが巨大化したら増分キャッシュ戦略を再検討 |
 
 ---
 

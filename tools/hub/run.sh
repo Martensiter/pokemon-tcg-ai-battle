@@ -13,6 +13,11 @@
 # full re-clone. Self-heals (clone + venv) only if the persistent copy is missing.
 set -euo pipefail
 
+# Never block the unattended cron on a git credential prompt. The repo is public
+# (anonymous fetch works, no token needed); if auth were ever required, git fails
+# fast and run.sh falls back to the on-disk code instead of hanging forever.
+export GIT_TERMINAL_PROMPT=0
+
 ROOT="/home/node/.openclaw/extensions/ptcg-collector"
 REPO="$ROOT/repo"
 PY="$REPO/.venv/bin/python"

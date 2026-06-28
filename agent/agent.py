@@ -6,12 +6,20 @@ with the greedy heuristic as a fast, robust fallback for everything else.
 """
 from __future__ import annotations
 
+import os
 import random
+import sys
 
 from .base import BaseAgent
 from .policy import choose as greedy_choose
 from .mcts import MCTS
 from . import config as C
+
+# Per-move search diagnostics to stderr (visible in Kaggle's Agent Logs). On by
+# default so a submission reveals how many simulations actually fit in the time
+# budget on the grader's CPU -- the one thing the duration logs can't show. Set
+# PTCG_LOG_SIMS=0 to silence. One short line per MCTS decision; negligible cost.
+_LOG_SIMS = os.environ.get("PTCG_LOG_SIMS", "1") != "0"
 
 
 def _candidates(sel: dict):
@@ -55,6 +63,12 @@ class MctsAgent(BaseAgent):
             pick = self.mcts.search(obs, cands)
         except Exception:
             pick = None
+        if _LOG_SIMS:
+            # sims = simulations completed in the budget; fails = determinizations
+            # that errored; fallback = sims < MIN so greedy was used instead.
+            print(f"sims={self.mcts.last_sims} fails={self.mcts.last_fails} "
+                  f"opts={len(cands)} {'fallback' if pick is None else 'mcts'}",
+                  file=sys.stderr, flush=True)
         if pick is None:
             return greedy_choose(obs, rng=self.rng)
         return pick

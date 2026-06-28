@@ -19,15 +19,22 @@ import numpy as np
 from .observation import active_of, in_play, prize_remaining, total_energy, n_conditions
 
 # Hash widths chosen modestly (data is ~8k samples; small dim avoids overfit).
-_ACTIVE_ID_DIM = 8     # active Pokemon id, hashed one-hot per player
-_BENCH_ID_DIM = 8      # bench Pokemon ids, hashed accumulator per player
-_HAND_ID_DIM = 8       # OWN-hand card ids, hashed accumulator (opp hand is None)
-_DISCARD_ID_DIM = 8    # discard pile card ids, hashed accumulator
-_ENERGY_TYPE_DIM = 6   # rough energy-type histogram per player
+_ACTIVE_ID_DIM = 8     # active Pokemon id, hashed one-hot per player (visible both seats)
+_BENCH_ID_DIM = 8      # bench Pokemon ids, hashed accumulator (visible both seats)
+# Hand is OCCLUDED for the non-acting seat -- including a per-player hand_id hash
+# silently flips train/inference distributions, because at training the replay
+# observation is always from the actor's view (own hand visible / opp None) but at
+# inference MCTS rollouts evaluate opp-turn leaves ~55% of the time, swapping the
+# orientation. The value net then sees an OOD pattern at most leaves. Removed for
+# correctness; a perspective-invariant rewrite (per acting/non-acting, not per
+# seat) is the right longer-term move.
+_HAND_ID_DIM = 0
+_DISCARD_ID_DIM = 8    # discard pile card ids (public, visible both seats)
+_ENERGY_TYPE_DIM = 6   # rough energy-type histogram per player (board energies are public)
 _STADIUM_DIM = 4       # stadium card id, hashed one-hot (global)
 
-# 13 (originals) + (active_id, bench_id, hand_id, discard_id, energy_type) + 5 scalars
-_PLAYER_FEATS = (13 + _ACTIVE_ID_DIM + _BENCH_ID_DIM + _HAND_ID_DIM
+# 13 (originals) + (active_id, bench_id, discard_id, energy_type) + 5 scalars
+_PLAYER_FEATS = (13 + _ACTIVE_ID_DIM + _BENCH_ID_DIM
                  + _DISCARD_ID_DIM + _ENERGY_TYPE_DIM + 5)
 _GLOBAL_FEATS = 6 + _STADIUM_DIM + 2                       # +stadium +(firstPlayer, turnActionCount)
 FEATURE_DIM = 2 * _PLAYER_FEATS + _GLOBAL_FEATS
@@ -92,10 +99,7 @@ def _player_block(pl: dict, out: list):
     # bench composition: hashed accumulator, normalized so size doesn't dominate.
     _hash_accumulate([p.get("id") for p in bench if isinstance(p, dict)],
                      _BENCH_ID_DIM, out)
-    # hand composition (own only -- opponent's hand is None / occluded).
-    hand = pl.get("hand") or []
-    _hash_accumulate([h.get("id") for h in hand if isinstance(h, dict)],
-                     _HAND_ID_DIM, out)
+    # (hand id intentionally dropped -- see _HAND_ID_DIM above for why.)
     # discard composition (visible to both seats -- a strong proxy for which
     # supporters / pokemons have already been spent).
     _hash_accumulate([h.get("id") for h in (pl.get("discard") or []) if isinstance(h, dict)],

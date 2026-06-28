@@ -73,7 +73,7 @@ class PolicyNet:
             if feat is None or feat.shape[0] != STATE_DIM:
                 return None
             n = len(options)
-            opt = np.stack([featurize_option(o, i, n, me) for i, o in enumerate(options)])
+            opt = np.stack([featurize_option(o, i, n, me, state) for i, o in enumerate(options)])
             state_rep = np.repeat(feat.reshape(1, -1), n, axis=0)
             X = np.concatenate([state_rep, opt], axis=1).astype(np.float32)
             return _softmax(self.scores(X))

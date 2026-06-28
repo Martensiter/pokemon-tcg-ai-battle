@@ -223,6 +223,16 @@ kaggle competitions submit -c pokemon-tcg-ai-battle \
 - **締切**：本コンペは現在 **オープン**。正確な締切日時は Kaggle コンペページの "Timeline" を参照（`<締切日: 要記入>`）。締切超過後は submit が弾かれる。
 - **Strategy Category** は別物（コード提出ではなくテキスト = `WRITEUP.md`）。混同しない。
 
+### 5b. スコアを上げる手（安い順・診断ベース）
+初回提出 567.5 の Agent Logs 診断＝**完全に正常**（毎手0.6s使用・タイムアウト/例外/フォールバック無し）。
+＝バグ起因ではなく実力値（小サンプル）。効く手は以下：
+- **効かない（実証済み）**：探索時間↑（1.2sは0.6sに12-53点負け）／デッキ変更（"agent is the bottleneck"）。
+- **① sims可視化**：agentは既定で1手ごとに `sims=N fails=.. opts=.. mcts/fallback` をstderr出力（`PTCG_LOG_SIMS=0`で無効）。
+  **次の提出のAgent Logsで「Kaggle機が0.6sで何sims回せるか」を確認**。少なければ②へ、十分なら③へ。
+- **② config A/Bスイープ**（データ不要・Mac）：`tools/sweep_config.py --param DETERMINIZATIONS_PER_MOVE --values 8,12,16,24`。
+  simsが足りないなら `DETERMINIZATIONS_PER_MOVE`/`ROLLOUT_DEPTH` を削って1手のsimsを増やす。`VALUE_NET_WEIGHT` も試す。良ければ `verify_candidate` で再確認→`agent/config.py`反映。
+- **③ value net 再学習**（本筋・長期）：収集→`daily_pipeline`→`verify_candidate`→再提出。数万局面で効く。
+
 ---
 
 ## 6. 残TODO（優先順）
@@ -271,7 +281,8 @@ kaggle competitions submit -c pokemon-tcg-ai-battle \
 | `selfplay/train_value_np.py` | torch無しnumpy学習（weights.npz出力） |
 | `tools/daily_pipeline.py` | 日次 merge→再学習→manifest同梱→Dataset公開 |
 | `tools/verify_candidate.py` | 自己対戦A/B勝率ゲート（engine機・`--promote`で昇格） |
-| `tools/make_submission.py` | 提出バンドル生成（agent/+deck→`submission_<name>.tar.gz`） |
+| `tools/sweep_config.py` | 探索/評価configのA/Bスイープ（engine機・データ不要でスコア詰め） |
+| `tools/make_submission.py` | 提出バンドル生成（agent/+deck+`cg/libcg.so`→`submission_<name>.tar.gz`） |
 | `src/collector/server.py` | `--serve` 制御API（OpenClaw用 status/collect・`age_seconds`） |
 | `docs/HANDOFF_MACBOOK.md` | engine機（Mac native）の実測詳細・**§4矛盾時はこちらが正** |
 | `docs/SUBMIT_BASELINE.md` | 今すぐベースラインを提出する最短手順（コピペ可） |

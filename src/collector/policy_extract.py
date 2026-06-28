@@ -61,11 +61,18 @@ def _single_index(action: Any, n: int) -> int | None:
     return i
 
 
-def iter_policy_decisions(payload: Any) -> Iterator[tuple[dict, int, list, int]]:
+def _bump(counts, key: str) -> None:
+    if counts is not None:
+        counts[key] = counts.get(key, 0) + 1
+
+
+def iter_policy_decisions(payload: Any, counts=None) -> Iterator[tuple[dict, int, list, int]]:
     """Yield ``(state, me, options, chosen_idx)`` for MAIN single-select decisions.
 
     Walks the Kaggle env timeline directly (the value path drops the action, which
     we need here). Never raises on malformed input -- bad entries are skipped.
+    If ``counts`` (a dict) is given, increments a reason key for each dropped
+    *real decision* so callers can see what's being discarded (and why).
     """
     steps = _as_list(_as_dict(payload).get("steps"))
     for step in steps:
@@ -77,18 +84,18 @@ def iter_policy_decisions(payload: Any) -> Iterator[tuple[dict, int, list, int]]
             cur = obs.get("current")
             sel = obs.get("select")
             if not isinstance(cur, dict) or not isinstance(sel, dict):
-                continue
+                continue                              # not a decision frame
             if _as_int(sel.get("context"), -1) != MAIN_CONTEXT:
-                continue
+                _bump(counts, "skip_non_main"); continue     # sub-decision (target/discard/...)
             options = _as_list(sel.get("option"))
-            if len(options) < 2:                     # single/zero option = no choice
-                continue
+            if len(options) < 2:                     # single/zero option = no real choice
+                _bump(counts, "skip_single_option"); continue
             me = _as_int(cur.get("yourIndex"), -1)
             if me not in (0, 1):
-                continue
+                _bump(counts, "skip_bad_seat"); continue
             chosen = _single_index(e.get("action"), len(options))
-            if chosen is None:                       # multi-select / invalid: skip
-                continue
+            if chosen is None:                       # multi-select / invalid action
+                _bump(counts, "skip_multi_select"); continue
             yield cur, me, options, chosen
 
 
@@ -124,29 +131,36 @@ class PolicyRecords:
 
 
 def episode_to_policy_records(payload: Any, records: PolicyRecords,
-                              winners_only: bool = True) -> int:
+                              winners_only: bool = False, counts=None) -> int:
     """Append policy rows from one raw replay. Returns decisions added.
 
-    With ``winners_only`` (default), only the winning seat's decisions are kept;
-    if the winner is unknown the episode contributes nothing (we can't tell which
-    seat played well).
+    Default keeps BOTH seats' decisions: in top-vs-top games the loser also plays
+    well (they just lost a close one), so dropping their moves throws away ~3.5x
+    of good examples. With ``winners_only`` only the winner's decisions are kept
+    (and draw/unknown-winner episodes contribute nothing). ``counts`` (a dict)
+    accumulates skip reasons for visibility.
     """
     rewards = extract_rewards(payload)
     winner = winner_from_rewards(rewards)
     if winners_only and winner in (-1, 2):
+        _bump(counts, "skip_draw_or_unknown_episode")
         return 0
     added = 0
-    for cur, me, options, chosen in iter_policy_decisions(payload):
+    for cur, me, options, chosen in iter_policy_decisions(payload, counts):
         if winners_only and me != winner:
+            _bump(counts, "skip_loser_seat")
             continue
         try:
             feat = extract(cur, me)
         except Exception:  # noqa: BLE001  (defensive: skip malformed state)
+            _bump(counts, "skip_bad_state")
             continue
         if feat is None or getattr(feat, "shape", (0,))[0] != STATE_DIM:
+            _bump(counts, "skip_bad_state")
             continue
-        opt_feats = [featurize_option(o, i, len(options), me)
+        opt_feats = [featurize_option(o, i, len(options), me, cur)
                      for i, o in enumerate(options)]
         records.add_decision(feat, opt_feats, chosen)
+        _bump(counts, "kept")
         added += 1
     return added

@@ -18,6 +18,7 @@ import glob
 import json
 import os
 import sys
+from collections import Counter
 
 import numpy as np
 
@@ -55,8 +56,9 @@ def main(argv: list[str] | None = None) -> int:
                     help="dirs / globs / files of raw replay json")
     ap.add_argument("--glob", default="*.json")
     ap.add_argument("--out", default=os.path.join(ROOT, "policy_data.npz"))
-    ap.add_argument("--all-seats", action="store_true",
-                    help="keep both seats' decisions (default: winner only)")
+    ap.add_argument("--winners-only", action="store_true",
+                    help="keep only the winner's decisions (default: BOTH seats -- "
+                         "top-vs-top losers also play well, so keep ~3.5x more data)")
     args = ap.parse_args(argv)
 
     files = find_files(args.src, args.glob)
@@ -65,26 +67,35 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     rec = PolicyRecords()
+    counts: Counter = Counter()
     used = 0
     for f in files:
         try:
             blob = json.load(open(f, encoding="utf-8"))
         except Exception as e:  # noqa: BLE001
             print(f"  [skip] {os.path.basename(f)}: {type(e).__name__}: {e}")
+            counts["skip_unreadable_file"] += 1
             continue
         added = episode_to_policy_records(_payload(blob), rec,
-                                          winners_only=not args.all_seats)
+                                          winners_only=args.winners_only, counts=counts)
         used += 1 if added else 0
+
+    # What got dropped, and why (debugging the data funnel).
+    print(f"replays: {used}/{len(files)} contributed decisions "
+          f"(winners_only={args.winners_only})")
+    for k in ("kept", "skip_loser_seat", "skip_non_main", "skip_single_option",
+              "skip_multi_select", "skip_bad_seat", "skip_bad_state",
+              "skip_draw_or_unknown_episode", "skip_unreadable_file"):
+        if counts.get(k):
+            print(f"  {k:30s} {counts[k]}")
 
     arr = rec.arrays()
     if len(arr["group"]) == 0:
-        print(f"no decisions extracted from {len(files)} file(s) "
-              f"(winners_only={not args.all_seats})")
+        print(f"no decisions extracted from {len(files)} file(s)")
         return 1
     os.makedirs(os.path.dirname(os.path.abspath(args.out)) or ".", exist_ok=True)
     np.savez_compressed(args.out, **arr)
-    print(f"{len(arr['group'])} decisions / {len(arr['opt'])} options from "
-          f"{used}/{len(files)} replays -> {args.out}")
+    print(f"{len(arr['group'])} decisions / {len(arr['opt'])} options -> {args.out}")
     print(f"train with:  python selfplay/train_policy_np.py --data {args.out}")
     return 0
 

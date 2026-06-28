@@ -16,10 +16,13 @@ for p in (ROOT, os.path.join(ROOT, "src")):
     if p not in sys.path:
         sys.path.insert(0, p)
 
+from collections import Counter
+
 from collector.policy_extract import (
     OPT_FEAT_DIM, OPTION_TYPE_DIM, STATE_DIM, PolicyRecords, _single_index,
     episode_to_policy_records, featurize_option,
 )
+from agent.policy_features import ATTACK_HASH_DIM, CARD_HASH_DIM, _N_FLAGS
 from collector.selftest import _state  # valid state dict (players) for features.extract
 
 OPTS = [
@@ -65,6 +68,36 @@ def test_featurize_option_type_and_flags():
     assert play[OPTION_TYPE_DIM + 0] == 1.0               # has area
     assert play[OPTION_TYPE_DIM + 3] == 1.0               # playerIndex == me
     assert abs(play[OPTION_TYPE_DIM + 4] - 2 / 3) < 1e-6  # normalized position
+
+
+def test_identity_distinguishes_same_type_options():
+    # two different attacks (same type, same position) were IDENTICAL before;
+    # now the attackId identity hash separates them.
+    a = featurize_option({"type": 13, "attackId": 5}, 0, 2, 0)
+    b = featurize_option({"type": 13, "attackId": 99}, 0, 2, 0)
+    assert not np.array_equal(a, b)
+    af = OPTION_TYPE_DIM + _N_FLAGS
+    assert not np.array_equal(a[af:af + ATTACK_HASH_DIM], b[af:af + ATTACK_HASH_DIM])
+
+
+def test_card_identity_resolved_from_state_db_free():
+    st = _state(1, 0)  # players[0].bench == [{"id": 101, ...}]
+    v = featurize_option({"type": 7, "area": 5, "index": 0, "playerIndex": 0}, 0, 2, 0, st)
+    cf = OPTION_TYPE_DIM + _N_FLAGS + ATTACK_HASH_DIM
+    assert v[cf:cf + CARD_HASH_DIM].sum() == 1.0   # exactly one card-id bucket set
+
+
+def test_default_keeps_both_seats():
+    rec = PolicyRecords()
+    added = episode_to_policy_records(_replay(winner=0), rec)   # default flipped to all-seats
+    assert added == 3                                           # both seats (was 2 winners-only)
+
+
+def test_skip_counts_breakdown():
+    c = Counter()
+    rec = PolicyRecords()
+    episode_to_policy_records(_replay(winner=0), rec, winners_only=True, counts=c)
+    assert c["kept"] == 2 and c["skip_loser_seat"] == 1
 
 
 def test_extract_winner_only():

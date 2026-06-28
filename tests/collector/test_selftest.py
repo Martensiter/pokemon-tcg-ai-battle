@@ -3,16 +3,17 @@ from __future__ import annotations
 
 import numpy as np
 
+from agent.features import FEATURE_DIM
 from collector.selftest import run_selftest
 
 
 def test_selftest_runs_and_validates(tmp_path):
     summary = run_selftest(workdir=tmp_path, n_subs=2, n_eps=3)
     assert summary["rows"] == 2 * 3 * 4
-    assert summary["feature_dim"] == 32
+    assert summary["feature_dim"] == FEATURE_DIM
     assert 0.0 <= summary["mean_label"] <= 1.0
     d = np.load(summary["chunk"])
-    assert d["X"].shape == (24, 32)
+    assert d["X"].shape == (24, FEATURE_DIM)
 
 
 def test_selftest_single(tmp_path):

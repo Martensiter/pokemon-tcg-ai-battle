@@ -16,6 +16,7 @@ agent/weights_v*.npz
 # Force-add (git add -f agent/policy.npz) only to ship a verified policy.
 agent/policy.npz
 policy_data*.npz
+value_data*.npz
 selfplay/data*.npz
 *.npz.bak
 

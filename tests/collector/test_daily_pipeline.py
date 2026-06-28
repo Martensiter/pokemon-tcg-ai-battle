@@ -10,10 +10,9 @@ import json
 
 import numpy as np
 
+from agent.features import FEATURE_DIM
 from collector.selftest import run_selftest
 from tools.daily_pipeline import _stage_state, run_pipeline
-
-FEATURE_DIM = 32
 
 
 def test_pipeline_trains_and_writes_candidate(tmp_path):
@@ -34,6 +33,24 @@ def test_pipeline_trains_and_writes_candidate(tmp_path):
 
     report = json.loads((data_dir / "weights" / "train_report.json").read_text())
     assert report["rows"] == summary["rows"] and "val_acc" in report
+
+
+def test_pipeline_prefers_raw_reextraction(tmp_path):
+    # raw replays present -> the pipeline re-extracts value data at the CURRENT
+    # FEATURE_DIM (dim-resilient), instead of trusting dim-frozen chunks.
+    import json as _json
+    from collector.selftest import _synthetic_replay
+    data_dir = tmp_path / "data"
+    raw = data_dir / "raw"
+    raw.mkdir(parents=True)
+    for i in range(4):
+        _json.dump(_synthetic_replay(winner=i % 2), open(raw / f"ep{i}.json", "w"))
+    out = run_pipeline(data_dir, hidden=[16], epochs=3, min_rows=1,
+                       publish=False, dataset_slug="")
+    assert out["trained"] is True
+    assert out["value_src"] == "raw"
+    d = np.load(data_dir / "weights" / "weights_candidate.npz")
+    assert d["W1"].shape[0] == FEATURE_DIM        # extracted at the live dim
 
 
 def test_pipeline_skips_when_too_few_rows(tmp_path):

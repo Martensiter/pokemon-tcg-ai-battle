@@ -66,16 +66,13 @@ def _bump(counts, key: str) -> None:
         counts[key] = counts.get(key, 0) + 1
 
 
-def iter_policy_decisions(payload: Any, counts=None,
-                          main_only: bool = False) -> Iterator[tuple[dict, int, list, int]]:
-    """Yield ``(state, me, options, chosen_idx)`` for single-select decisions.
+def iter_policy_decisions(payload: Any, counts=None) -> Iterator[tuple[dict, int, list, int]]:
+    """Yield ``(state, me, options, chosen_idx)`` for MAIN single-select decisions.
 
-    By default keeps both MAIN and sub-decision frames (target/discard/...). Set
-    ``main_only=True`` to mirror the older MAIN-only contract. Walks the Kaggle
-    env timeline directly (the value path drops the action, which we need here).
-    Never raises on malformed input -- bad entries are skipped. If ``counts`` (a
-    dict) is given, increments a reason key for each dropped *real decision* so
-    callers can see what's being discarded (and why).
+    Walks the Kaggle env timeline directly (the value path drops the action, which
+    we need here). Never raises on malformed input -- bad entries are skipped.
+    If ``counts`` (a dict) is given, increments a reason key for each dropped
+    *real decision* so callers can see what's being discarded (and why).
     """
     steps = _as_list(_as_dict(payload).get("steps"))
     for step in steps:
@@ -88,9 +85,8 @@ def iter_policy_decisions(payload: Any, counts=None,
             sel = obs.get("select")
             if not isinstance(cur, dict) or not isinstance(sel, dict):
                 continue                              # not a decision frame
-            ctx = _as_int(sel.get("context"), -1)
-            if main_only and ctx != MAIN_CONTEXT:
-                _bump(counts, "skip_non_main"); continue
+            if _as_int(sel.get("context"), -1) != MAIN_CONTEXT:
+                _bump(counts, "skip_non_main"); continue     # sub-decision (target/discard/...)
             options = _as_list(sel.get("option"))
             if len(options) < 2:                     # single/zero option = no real choice
                 _bump(counts, "skip_single_option"); continue
@@ -135,8 +131,7 @@ class PolicyRecords:
 
 
 def episode_to_policy_records(payload: Any, records: PolicyRecords,
-                              winners_only: bool = False, counts=None,
-                              main_only: bool = False) -> int:
+                              winners_only: bool = False, counts=None) -> int:
     """Append policy rows from one raw replay. Returns decisions added.
 
     Default keeps BOTH seats' decisions: in top-vs-top games the loser also plays
@@ -151,8 +146,7 @@ def episode_to_policy_records(payload: Any, records: PolicyRecords,
         _bump(counts, "skip_draw_or_unknown_episode")
         return 0
     added = 0
-    for cur, me, options, chosen in iter_policy_decisions(payload, counts,
-                                                          main_only=main_only):
+    for cur, me, options, chosen in iter_policy_decisions(payload, counts):
         if winners_only and me != winner:
             _bump(counts, "skip_loser_seat")
             continue

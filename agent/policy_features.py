@@ -27,17 +27,17 @@ STATE_DIM = FEATURE_DIM
 # One-hot of the option ``type`` (OptionType has ~54 members and may grow mid-
 # season, so bucket generously and clamp overflow into the last bucket).
 OPTION_TYPE_DIM = 64
-_N_FLAGS = 5                         # has-area, has-attackId, has-index, has-inPlayArea, pos
+_N_FLAGS = 5                         # has-area, has-attackId, has-index, mine, pos
 # Hashed one-hot of the option IDENTITY (breaks the same-type collapse, DB-free).
 ATTACK_HASH_DIM = 32
 CARD_HASH_DIM = 64
 OPT_FEAT_DIM = OPTION_TYPE_DIM + _N_FLAGS + ATTACK_HASH_DIM + CARD_HASH_DIM
 
 
-# AreaType: 2=HAND 3=DISCARD 4=ACTIVE 5=BENCH (the public/own areas whose card
-# ids the acting seat can see). Mirrors agent.policy._card_id_from_option but
-# WITHOUT importing it (that module pulls the engine) -- pure dict access only.
-_AREA_KEY = {2: "hand", 3: "discard", 4: "active", 5: "bench"}
+# AreaType: 2=HAND 3=DISCARD 5=BENCH (the public/own areas whose card ids the
+# acting seat can see). Mirrors agent.policy._card_id_from_option but WITHOUT
+# importing it (that module pulls the engine) -- pure dict access only.
+_AREA_KEY = {2: "hand", 3: "discard", 5: "bench"}
 
 
 def _resolve_card_id(o: dict, state) -> int | None:
@@ -80,12 +80,8 @@ def featurize_option(o: dict, idx: int, n: int, me: int, state=None) -> np.ndarr
     v[base + 0] = 1.0 if o.get("area") is not None else 0.0
     v[base + 1] = 1.0 if o.get("attackId") is not None else 0.0
     v[base + 2] = 1.0 if o.get("index") is not None else 0.0
-    # Option dicts do NOT carry playerIndex (the engine omits it -- MAIN single-
-    # select options are by construction the to-move seat's own action), so the
-    # previous "mine == playerIndex == me" flag was dead-on-arrival (always 0).
-    # Repurpose the slot for "targets an in-play card" -- this *does* vary across
-    # options at the same MAIN decision (energy attach vs supporter play etc.).
-    v[base + 3] = 1.0 if o.get("inPlayArea") is not None else 0.0
+    pi = o.get("playerIndex")
+    v[base + 3] = 1.0 if (pi is not None and pi == me) else 0.0
     v[base + 4] = (idx / n) if n else 0.0
     # identity: which attack, and which card (so same-type options differ)
     idf = base + _N_FLAGS

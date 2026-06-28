@@ -59,9 +59,6 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--winners-only", action="store_true",
                     help="keep only the winner's decisions (default: BOTH seats -- "
                          "top-vs-top losers also play well, so keep ~3.5x more data)")
-    ap.add_argument("--main-only", action="store_true",
-                    help="keep only MAIN-context decisions (default: also take "
-                         "sub-decisions like target/discard -- ~2x more data)")
     args = ap.parse_args(argv)
 
     files = find_files(args.src, args.glob)
@@ -80,8 +77,7 @@ def main(argv: list[str] | None = None) -> int:
             counts["skip_unreadable_file"] += 1
             continue
         added = episode_to_policy_records(_payload(blob), rec,
-                                          winners_only=args.winners_only,
-                                          main_only=args.main_only, counts=counts)
+                                          winners_only=args.winners_only, counts=counts)
         used += 1 if added else 0
 
     # What got dropped, and why (debugging the data funnel).

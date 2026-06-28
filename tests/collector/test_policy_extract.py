@@ -28,7 +28,7 @@ from collector.selftest import _state  # valid state dict (players) for features
 OPTS = [
     {"type": 13, "attackId": 5},                                  # ATTACK
     {"type": 14},                                                  # END
-    {"type": 7, "area": 2, "index": 0, "inPlayArea": 5},          # PLAY from hand to bench
+    {"type": 7, "area": 2, "index": 0, "playerIndex": 0},          # PLAY from hand
 ]
 
 
@@ -66,7 +66,7 @@ def test_featurize_option_type_and_flags():
     assert v[OPTION_TYPE_DIM + 0] == 0.0                  # no area
     play = featurize_option(OPTS[2], idx=2, n=3, me=0)
     assert play[OPTION_TYPE_DIM + 0] == 1.0               # has area
-    assert play[OPTION_TYPE_DIM + 3] == 1.0               # has-inPlayArea (was: mine)
+    assert play[OPTION_TYPE_DIM + 3] == 1.0               # playerIndex == me
     assert abs(play[OPTION_TYPE_DIM + 4] - 2 / 3) < 1e-6  # normalized position
 
 

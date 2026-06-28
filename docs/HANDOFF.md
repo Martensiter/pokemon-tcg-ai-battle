@@ -232,6 +232,9 @@ kaggle competitions submit -c pokemon-tcg-ai-battle \
 - **② config A/Bスイープ**（データ不要・Mac）：`tools/sweep_config.py --param DETERMINIZATIONS_PER_MOVE --values 8,12,16,24`。
   simsが足りないなら `DETERMINIZATIONS_PER_MOVE`/`ROLLOUT_DEPTH` を削って1手のsimsを増やす。`VALUE_NET_WEIGHT` も試す。良ければ `verify_candidate` で再確認→`agent/config.py`反映。
 - **③ value net 再学習**（本筋・長期）：収集→`daily_pipeline`→`verify_candidate`→再提出。数万局面で効く。
+- **④ 上位蒸留（behavioral cloning）**：上位replayの「選んだ手」を模倣する policyネット。**オフライン基盤は実装済み**
+  （`tools/extract_policy.py`→`selfplay/train_policy_np.py`。生replayは収集機が保存済み・engine/CSV/torch不要・winner手のみ）。
+  **agentへの統合（rollout方策/prior/直接模倣）＋engine検証は未実装＝次の大きい一手**。詳細は各ファイルのdocstring。
 
 ---
 
@@ -282,6 +285,8 @@ kaggle competitions submit -c pokemon-tcg-ai-battle \
 | `tools/daily_pipeline.py` | 日次 merge→再学習→manifest同梱→Dataset公開 |
 | `tools/verify_candidate.py` | 自己対戦A/B勝率ゲート（engine機・`--promote`で昇格） |
 | `tools/sweep_config.py` | 探索/評価configのA/Bスイープ（engine機・データ不要でスコア詰め） |
+| `src/collector/policy_extract.py` ＋ `tools/extract_policy.py` | 上位蒸留：生replay→(state,選択肢,選んだ手) policy records（engine/CSV不要） |
+| `selfplay/train_policy_np.py` | policyネットをnumpyで学習（grouped softmax CE → `policy.npz`） |
 | `tools/make_submission.py` | 提出バンドル生成（agent/+deck+`cg/libcg.so`→`submission_<name>.tar.gz`） |
 | `src/collector/server.py` | `--serve` 制御API（OpenClaw用 status/collect・`age_seconds`） |
 | `docs/HANDOFF_MACBOOK.md` | engine機（Mac native）の実測詳細・**§4矛盾時はこちらが正** |

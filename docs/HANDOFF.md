@@ -210,7 +210,7 @@ kaggle competitions submit -c pokemon-tcg-ai-battle \
 > （`datasets download` 側は逆に `kaggle<1.7` の legacy auth で通る — §4 参照。）
 
 > **提出方針（現時点の推奨）**：まず **現行ベースライン（`agent/weights.npz` ＋ `deck_cand_hops_hybrid_v2.csv`）を
-> 1回だけ提出してボードに載せる**のが正解。まだ誰も出していないので「在席」する価値が高く、実績~948の既知bundleで低リスク。
+> 1回だけ提出してボードに載せる**のが正解。まだ誰も出していないので「在席」する価値が高い。既知動作の bundle で低リスク（**初回提出の実測は 567.5**。過去の自己申告 WRITEUP=v2 1127.8 / README=baseline 948 は**小サンプル・別メタ・未検証**なので過信しない）。
 > これは `kaggle auth login`（OAuth）かブラウザ手動アップロードの **人手1回**で済む（②③だけ実施＝検証スキップでも可、ベースラインは既知良）。
 > **ループからの自動提出は当面オフ**：理由は ①`competitions submit` が **OAuth 必須で無人化できない**、
 > ②候補modelはまだ baseline を超えない（データ少量で verify が FAIL ＝ 出しても無意味）。

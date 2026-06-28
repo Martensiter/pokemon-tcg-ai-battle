@@ -38,3 +38,12 @@ WEIGHTS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "weights
 
 # Blend between heuristic and value net at leaves: 0 = pure heuristic, 1 = pure net.
 VALUE_NET_WEIGHT = float(os.environ.get("PTCG_VNET_W", "0.7"))
+
+# --- Behavioral-cloning policy prior (top-agent distillation), OPT-IN ----------
+# Path to the policy-net weights (selfplay/train_policy_np.py). Loaded only when
+# POLICY_PUCT_C > 0; otherwise the agent uses plain UCB1 exactly as before.
+POLICY_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "policy.npz")
+# PUCT exploration coefficient for the policy prior at the MCTS root. 0 = OFF
+# (default): no prior, no behavior change. Tune (e.g. 1.0-3.0) + verify on the
+# engine machine before shipping. Env override: PTCG_POLICY_PUCT_C.
+POLICY_PUCT_C = float(os.environ.get("PTCG_POLICY_PUCT_C", "0.0"))

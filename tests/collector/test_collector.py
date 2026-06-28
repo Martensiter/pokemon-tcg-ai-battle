@@ -4,6 +4,7 @@ from __future__ import annotations
 import numpy as np
 import conftest as cf
 
+from agent.features import FEATURE_DIM
 from collector.collector import Collector
 from collector.config import CollectorConfig
 from collector.manifest import Manifest
@@ -62,7 +63,7 @@ def test_run_once_produces_loadable_chunk(tmp_path):
     assert len(chunks) == 1
     d = np.load(chunks[0])
     assert d["X"].shape[0] == 24
-    assert d["X"].shape[1] == 32
+    assert d["X"].shape[1] == FEATURE_DIM
     assert set(np.unique(d["y"])).issubset({0.0, 0.5, 1.0})
 
 

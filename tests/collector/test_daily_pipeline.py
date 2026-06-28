@@ -10,10 +10,9 @@ import json
 
 import numpy as np
 
+from agent.features import FEATURE_DIM
 from collector.selftest import run_selftest
 from tools.daily_pipeline import _stage_state, run_pipeline
-
-FEATURE_DIM = 32
 
 
 def test_pipeline_trains_and_writes_candidate(tmp_path):

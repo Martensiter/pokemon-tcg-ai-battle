@@ -47,8 +47,9 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     rec = ValueRecords()
+    groups: list[int] = []   # one episode id per row, for episode-aware train/val split
     counts: Counter = Counter()
-    for fname in sorted(os.listdir(args.src)):
+    for ep_idx, fname in enumerate(sorted(os.listdir(args.src))):
         path = os.path.join(args.src, fname)
         if not fname.endswith(".json"):
             continue
@@ -64,9 +65,11 @@ def main(argv: list[str] | None = None) -> int:
         if not ep.ok:
             counts["skip_parse_failed"] += 1
             continue
+        before = len(rec)
         added = episode_to_records(ep, rec)
         if added > 0:
             counts["ok"] += 1
+            groups.extend([ep_idx] * (len(rec) - before))    # mark rows with this episode
         else:
             counts["skip_no_value_rows"] += 1               # eg. draw / no MAIN frames
 
@@ -80,7 +83,8 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     os.makedirs(os.path.dirname(os.path.abspath(args.out)) or ".", exist_ok=True)
-    np.savez_compressed(args.out, X=X, y=y)
+    group_arr = np.asarray(groups, dtype=np.int32)
+    np.savez_compressed(args.out, X=X, y=y, group=group_arr)
     print(f"replays: ok={counts['ok']}, skip_small={counts['skip_too_small']}, "
           f"skip_parse={counts['skip_parse_failed']}, "
           f"skip_no_rows={counts['skip_no_value_rows']}, "

@@ -38,6 +38,7 @@
 | D6 | policy.npz は gitignore | 未検証の方策を誤ってshipしない | 検証後に `git add -f` で意図的にship |
 | D7 | 提出bundleにエンジンを同梱（Linux x86_64 .so） | Kaggleはエンジンを用意しない（実測） | — |
 | D8 | 日次再学習は**生replayから再抽出**（dim凍結chunk依存をやめる） | Macが `FEATURE_DIM` を変える度（32→124）に過去chunkがdim不一致で無言で捨てられるため。rawから現dimで再生成＝Macの精度変更に自動追従（Hub反映の第1号） | rawが巨大化したら増分キャッシュ戦略を再検討 |
+| D9 | `run.sh` が毎回**ブランチへ自動同期**（fetch＋reset、deps変更時のみ再install） | Hubは pull していなかった＝Macの確定変更（A軸=124次元 layer-A特徴 等）が**Hubに届いていなかった**。これで「Mac精度向上→確定push→Hub自動反映」が成立。repoはコード専用（data/state/.envは外）なので hard reset 安全 | 壊れたpushを自動取り込むリスク。`PTCG_NO_PULL=1` で固定可。tag運用にするなら見直し |
 
 ---
 

@@ -37,7 +37,9 @@ fi
 # features, dims, tools) reach the 24/7 loop without a manual deploy. On network
 # failure we keep running the on-disk code. Override branch via PTCG_BRANCH; set
 # PTCG_NO_PULL=1 to pin the Hub to its current commit.
-BRANCH="${PTCG_BRANCH:-claude/replay-collector-production-7ylifb}"
+# Tracks `main` (the deployable line; changes land via auto-merged PRs, not direct
+# pushes) -- override with PTCG_BRANCH to follow a feature branch for testing.
+BRANCH="${PTCG_BRANCH:-main}"
 if [ "${PTCG_NO_PULL:-0}" != "1" ]; then
   old="$(git -C "$REPO" rev-parse HEAD 2>/dev/null || echo none)"
   if ( cd "$REPO" && git fetch --quiet origin "$BRANCH" \

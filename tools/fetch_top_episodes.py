@@ -46,11 +46,28 @@ def read_index(manifest_text: str) -> list[dict]:
         rows.append({
             "date": r["date"],
             "slug": r["daily_dataset_slug"],
+            "ref": dataset_ref(r.get("daily_dataset_url", ""),
+                               r["daily_dataset_slug"]),
             "episode_count": int(r["episode_count"]),
             "total_bytes": int(r["total_bytes"]),
         })
     rows.sort(key=lambda r: r["date"])
     return rows
+
+
+def dataset_ref(url: str, slug: str) -> str:
+    """Derive the ``owner/slug`` dataset ref from the manifest's URL.
+
+    The daily datasets are published by ``kaggle`` today, but the manifest
+    carries a full URL (``.../datasets/<owner>/<slug>``) -- trust that over a
+    hard-coded owner, falling back to ``kaggle/<slug>``.
+    """
+    parts = [p for p in url.split("/") if p]
+    if "datasets" in parts:
+        i = parts.index("datasets")
+        if len(parts) >= i + 3:
+            return f"{parts[i + 1]}/{parts[i + 2]}"
+    return f"kaggle/{slug}"
 
 
 def pick_day(rows: list[dict], date: str | None = None,
@@ -91,12 +108,11 @@ def download_day(day: dict, day_dir: str, kaggle_bin: str,
     expected number of JSONs (use ``--force`` to re-download).
     """
     have = len(glob.glob(os.path.join(day_dir, "*.json")))
-    if have >= day["episode_count"] and not force:
+    if 0 < day["episode_count"] <= have and not force:
         print(f"{day['date']}: {have} JSONs already staged, skipping download")
         return have
     os.makedirs(day_dir, exist_ok=True)
-    _run([kaggle_bin, "datasets", "download", "-d", f"kaggle/{day['slug']}",
-          "-p", day_dir])
+    _run([kaggle_bin, "datasets", "download", "-d", day["ref"], "-p", day_dir])
     for z in glob.glob(os.path.join(day_dir, "*.zip")):
         print(f"unzipping {os.path.basename(z)} ...", flush=True)
         with zipfile.ZipFile(z) as zf:
@@ -104,15 +120,22 @@ def download_day(day: dict, day_dir: str, kaggle_bin: str,
         os.remove(z)
     n = len(glob.glob(os.path.join(day_dir, "*.json")))
     print(f"{day['date']}: staged {n}/{day['episode_count']} episode JSONs")
+    if n == 0:
+        raise SystemExit(f"{day['date']}: no episode JSONs staged -- "
+                         "download or unzip failed")
+    if n < day["episode_count"]:
+        print(f"WARNING: {day['episode_count'] - n} episodes missing vs the "
+              "index manifest; extraction proceeds on the staged subset")
     return n
 
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--date", help="index day to fetch (YYYY-MM-DD)")
-    ap.add_argument("--latest", action="store_true",
-                    help="fetch the most recent day in the index")
+    day_sel = ap.add_mutually_exclusive_group()
+    day_sel.add_argument("--date", help="index day to fetch (YYYY-MM-DD)")
+    day_sel.add_argument("--latest", action="store_true",
+                         help="fetch the most recent day in the index")
     ap.add_argument("--out-root", default=os.path.join(ROOT, "episodes"),
                     help="staging root; JSONs land in <out-root>/<date>/")
     ap.add_argument("--policy-out", default=None,

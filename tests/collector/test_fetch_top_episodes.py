@@ -3,13 +3,13 @@ from __future__ import annotations
 
 import pytest
 
-from tools.fetch_top_episodes import pick_day, read_index
+from tools.fetch_top_episodes import dataset_ref, pick_day, read_index
 
 MANIFEST = """\
 date,daily_dataset_slug,daily_dataset_url,episode_count,total_bytes,top_avg_score,median_avg_score
-2026-06-17,pokemon-tcg-ai-battle-episodes-2026-06-17,https://example/x,7819,21474554811,1259.8,761.0
+2026-06-17,pokemon-tcg-ai-battle-episodes-2026-06-17,https://www.kaggle.com/datasets/kaggle/pokemon-tcg-ai-battle-episodes-2026-06-17,7819,21474554811,1259.8,761.0
 2026-06-16,pokemon-tcg-ai-battle-episodes-2026-06-16,https://example/x,1277,2854565943,1024.6,627.8
-2026-07-01,pokemon-tcg-ai-battle-episodes-2026-07-01,https://example/x,5266,21472709170,1344.6,1180.3
+2026-07-01,pokemon-tcg-ai-battle-episodes-2026-07-01,https://www.kaggle.com/datasets/kaggle/pokemon-tcg-ai-battle-episodes-2026-07-01,5266,21472709170,1344.6,1180.3
 """
 
 
@@ -35,3 +35,14 @@ def test_pick_day_rejects_unknown_and_missing_selector():
         pick_day(rows)
     with pytest.raises(SystemExit):
         pick_day([], latest=True)
+
+
+def test_dataset_ref_prefers_manifest_url_owner():
+    rows = read_index(MANIFEST)
+    # proper URL: owner/slug parsed from .../datasets/<owner>/<slug>
+    assert rows[1]["ref"] == "kaggle/pokemon-tcg-ai-battle-episodes-2026-06-17"
+    # unparseable URL: falls back to the kaggle/<slug> convention
+    assert rows[0]["ref"] == "kaggle/pokemon-tcg-ai-battle-episodes-2026-06-16"
+    assert dataset_ref("https://www.kaggle.com/datasets/someorg/some-slug",
+                       "ignored") == "someorg/some-slug"
+    assert dataset_ref("", "fallback-slug") == "kaggle/fallback-slug"

@@ -58,7 +58,7 @@ def train_mlp(X: np.ndarray, y: np.ndarray, hidden: list[int],
     n_val = int(n * val_frac)
     Xva, yva = X[:n_val], y[:n_val]
     Xtr, ytr = X[n_val:], y[n_val:]
-    if len(Xtr) == 0:                      # tiny datasets: train on everything
+    if len(Xtr) == 0 or len(Xva) == 0:     # tiny datasets: train/validate on everything
         Xtr, ytr, Xva, yva = X, y, X, y
 
     dims = [d] + list(hidden) + [1]

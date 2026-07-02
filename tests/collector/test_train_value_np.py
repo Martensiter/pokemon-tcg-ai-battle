@@ -80,3 +80,15 @@ def test_patience_zero_keeps_fixed_epochs():
     _, metrics = train_mlp(X, y, hidden=[64, 64], epochs=7, patience=0, verbose=False)
     assert metrics["epochs_run"] == 7
     assert metrics["best_epoch"] == 7                  # final weights exported
+
+
+def test_tiny_dataset_with_patience_has_real_val_metrics():
+    # n <= 9 at val_frac=0.1 used to yield an empty val split -> NaN val_loss,
+    # which made early stopping treat every epoch as "no improvement" and
+    # silently truncate training to exactly `patience` epochs.
+    X, y = _separable_data(n=8)
+    weights, metrics = train_mlp(X, y, hidden=[8], epochs=30, patience=10,
+                                 verbose=False)
+    assert np.isfinite(metrics["val_loss"])
+    assert metrics["best_epoch"] >= 1
+    assert [k for k in weights] == ["W1", "b1", "W2", "b2"]

@@ -133,3 +133,79 @@ def test_render_smoke():
     assert "Submission 54269263" in text and "W-L: 2-1" in text
     summary = render_summary([r, {"submission_id": 1, "error": "HTTP 500"}])
     assert "700.4" in summary and "HTTP 500" in summary
+
+
+def test_ordering_uses_end_time_not_create_time():
+    # Episode A was created first but finished LAST (long game): the current
+    # score must come from A (endTime-latest), not B (createTime-latest).
+    ep_a = _episode(10, "2026-07-02T15:00:00Z",
+                    [_agent(MY_SUB, 1, 720.0, MY_TEAM),
+                     _agent(999, -1, 600.0, 111)])
+    ep_a["endTime"] = "2026-07-02T15:30:00Z"
+    ep_b = _episode(11, "2026-07-02T15:05:00Z",
+                    [_agent(MY_SUB, -1, 690.0, MY_TEAM),
+                     _agent(998, 1, 610.0, 222)])
+    ep_b["endTime"] = "2026-07-02T15:10:00Z"
+    payload = {"episodes": [ep_a, ep_b], "teams": [], "submissions": []}
+    r = build_report(payload, MY_SUB,
+                     now=datetime(2026, 7, 2, 16, 0, tzinfo=timezone.utc))
+    assert r["score"] == 720.0            # endTime-latest episode wins
+    assert r["trajectory"] == [690.0, 720.0]
+    assert r["recent_games"][0]["score"] == 720.0  # newest first by endTime
+
+
+def test_missing_end_time_falls_back_to_create_time():
+    ep = _episode(12, "2026-07-02T15:00:00Z",
+                  [_agent(MY_SUB, 1, 640.0, MY_TEAM),
+                   _agent(999, -1, 600.0, 111)])
+    del ep["endTime"]
+    r = build_report({"episodes": [ep], "teams": [], "submissions": []},
+                     MY_SUB,
+                     now=datetime(2026, 7, 2, 16, 0, tzinfo=timezone.utc))
+    assert r["score"] == 640.0
+    assert r["last_episode_utc"] == "2026-07-02 15:00"
+
+
+def test_fetch_retries_transient_and_fails_fast_on_client_error(monkeypatch):
+    import io
+    import json as _json
+    import urllib.error
+    import urllib.request
+
+    import tools.report_scores as rs
+
+    calls = {"n": 0}
+
+    def flaky_urlopen(req, timeout=0):
+        calls["n"] += 1
+        if calls["n"] < 3:  # two 503s, then success
+            raise urllib.error.HTTPError(req.full_url, 503, "boom", {}, io.BytesIO())
+
+        class Resp(io.BytesIO):
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        return Resp(_json.dumps({"episodes": []}).encode())
+
+    slept = []
+    monkeypatch.setattr(urllib.request, "urlopen", flaky_urlopen)
+    payload = rs.fetch_episodes(1, sleep=slept.append)
+    assert payload == {"episodes": []}
+    assert calls["n"] == 3 and len(slept) == 2   # backed off twice
+    assert slept[0] < slept[1]                   # exponential
+
+    def always_404(req, timeout=0):
+        calls["n"] += 1
+        raise urllib.error.HTTPError(req.full_url, 404, "nope", {}, io.BytesIO())
+
+    calls["n"] = 0
+    monkeypatch.setattr(urllib.request, "urlopen", always_404)
+    try:
+        rs.fetch_episodes(1, sleep=slept.append)
+        raise AssertionError("expected HTTPError")
+    except urllib.error.HTTPError:
+        pass
+    assert calls["n"] == 1                       # no retry on permanent 4xx

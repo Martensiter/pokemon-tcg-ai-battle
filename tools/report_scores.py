@@ -7,7 +7,15 @@ A comparison table across all submissions closes the report.
 
 Data source is the same public read-only JSON endpoint the kaggle.com episode
 page uses (POST ListEpisodes with a submissionId body) -- no auth, no HTML
-scraping. We sleep between requests to stay polite.
+scraping. We sleep between requests to stay polite and retry transient
+failures (HTTP 429/5xx, network errors) with exponential backoff.
+
+CAVEAT -- unofficial endpoint: this tool depends on the internal JSON RPC used
+by the kaggle.com frontend (api/i/competitions.EpisodeService/ListEpisodes).
+We rely on it because the per-episode rating (``updatedScore``) is not exposed
+by the official Kaggle CLI. If the endpoint shape ever changes, fall back to
+the official ``kaggle competitions episodes <id> --csv`` -- that keeps the
+episode list working but loses ``updatedScore`` (no score trajectory).
 
 Usage:
     python tools/report_scores.py                       # DEFAULT_SUBMISSIONS
@@ -22,8 +30,10 @@ import argparse
 import json
 import sys
 import time
+import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
+from typing import Callable
 
 LIST_EPISODES_URL = (
     "https://www.kaggle.com/api/i/competitions.EpisodeService/ListEpisodes"
@@ -41,22 +51,54 @@ DEFAULT_SUBMISSIONS = [
 REQUEST_SLEEP_S = 1.5   # pause between API calls (be nice to Kaggle)
 TRAJECTORY_POINTS = 10  # target length of the thinned score trajectory
 
+MAX_RETRIES = 3         # extra attempts after the first (4 tries total)
+BACKOFF_BASE_S = 2.0    # retry delay = min(cap, base * 2**attempt)
+BACKOFF_CAP_S = 30.0
+
 
 # ---------------------------------------------------------------------------
-# network layer (kept separate so unit tests never touch it)
+# network layer (kept separate so the pure-logic unit tests never touch it)
 # ---------------------------------------------------------------------------
 
-def fetch_episodes(submission_id: int, timeout: float = 30.0) -> dict:
-    """POST the public ListEpisodes endpoint and return the parsed payload."""
+def _is_retryable_status(status: int) -> bool:
+    """429 (rate limit) and 5xx (server hiccup) are transient; other 4xx are
+    permanent client errors and must fail immediately."""
+    return status == 429 or 500 <= status <= 599
+
+
+def fetch_episodes(submission_id: int, timeout: float = 30.0, *,
+                   max_retries: int = MAX_RETRIES,
+                   sleep: Callable[[float], None] = time.sleep) -> dict:
+    """POST the public ListEpisodes endpoint and return the parsed payload.
+
+    Same retry semantics as src/collector/ratelimit.retry_with_backoff (which
+    is not importable from this standalone stdlib-only script): transient
+    failures -- HTTP 429/5xx, network errors, timeouts -- are retried up to
+    ``max_retries`` times with exponential backoff; any other HTTP error is
+    raised immediately. ``sleep`` is injectable so tests run without delays.
+    """
     body = json.dumps({"submissionId": submission_id}).encode("utf-8")
-    req = urllib.request.Request(
-        LIST_EPISODES_URL,
-        data=body,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+    last_err: Exception | None = None
+    for attempt in range(max_retries + 1):
+        req = urllib.request.Request(
+            LIST_EPISODES_URL,
+            data=body,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            if not _is_retryable_status(e.code):
+                raise  # permanent client error (400/401/404/...): fail fast
+            last_err = e
+        except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
+            last_err = e  # network-level failure: treat as transient
+        if attempt < max_retries:
+            sleep(min(BACKOFF_CAP_S, BACKOFF_BASE_S * (2 ** attempt)))
+    assert last_err is not None  # loop always sets it before falling through
+    raise last_err
 
 
 # ---------------------------------------------------------------------------
@@ -122,8 +164,11 @@ def build_report(payload: dict, submission_id: int, *,
         if not ours:
             continue
         opponents = [a for a in agents if a.get("submissionId") != submission_id]
-        rows.append((parse_utc(ep["createTime"]), ours[0], opponents,
-                     ep.get("type", "")))
+        # Ratings update when an episode ENDS: concurrent episodes can finish
+        # out of createTime order, so the score series must be endTime-ordered
+        # (createTime is only a fallback for never-finished episodes).
+        ts = ep.get("endTime") or ep["createTime"]
+        rows.append((parse_utc(ts), ours[0], opponents, ep.get("type", "")))
     rows.sort(key=lambda r: r[0])
 
     public = [r for r in rows if r[3] == "EPISODE_TYPE_PUBLIC"]

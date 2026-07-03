@@ -42,7 +42,8 @@ LIST_EPISODES_URL = (
 MY_TEAM_ID = 16421669  # ichitaro3
 
 DEFAULT_SUBMISSIONS = [
-    54269242,  # 117-dim acting-hand (2026-07-02)
+    54297461,  # value-D: 117-dim on official top-episodes 419k (2026-07-03)
+    54269242,  # 117-dim acting-hand, hub data (2026-07-02)
     54269263,  # 124-dim rerun (2026-07-02)
     54144305,  # 108-dim hand_id removed (2026-06-28)
     54143607,  # 124-dim original (2026-06-28)

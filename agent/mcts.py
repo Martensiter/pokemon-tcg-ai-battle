@@ -23,7 +23,7 @@ from cg.api import to_observation_class
 
 from . import config as C
 from .determinize import determinize
-from .policy import choose as policy_choose
+from .policy import choose as policy_choose, option_scores
 from .evaluate import evaluate as heuristic_evaluate
 from .policy_net import PolicyNet, puct_select  # numpy-only; opt-in policy prior
 
@@ -45,6 +45,26 @@ def terminal_value(state: dict, me: int) -> float:
     return 1.0 if res == me else -1.0
 
 
+def softmax_floor(raw: list[float], temp: float, floor: float) -> list[float]:
+    """Softmax(raw/temp) blended with a uniform floor; sums to 1.
+
+    The floor keeps every arm explorable even when the heuristic is confidently
+    wrong (the policy-net lesson: a bad sharp prior actively hurts search).
+    Pure function so it is unit-testable without the engine.
+    """
+    n = len(raw)
+    if n == 0:
+        return []
+    t = max(temp, 1e-6)
+    m = max(raw)
+    exps = [math.exp((r - m) / t) for r in raw]
+    s = sum(exps)
+    fl = min(max(floor, 0.0), 1.0)
+    if s <= 0:
+        return [1.0 / n] * n
+    return [(1.0 - fl) * e / s + fl / n for e in exps]
+
+
 class MCTS:
     def __init__(self, deck: list[int], rng: random.Random, eval_fn=None, cfg=C):
         self.deck = deck
@@ -57,6 +77,10 @@ class MCTS:
         # the default agent is byte-for-byte unchanged (plain UCB1, no policy.npz).
         self.puct_c = float(getattr(cfg, "POLICY_PUCT_C", 0.0) or 0.0)
         self.policy = PolicyNet.maybe_load(getattr(cfg, "POLICY_PATH", "")) if self.puct_c > 0 else None
+        # Opt-in heuristic prior (L3): softmax over policy.option_scores(). Also
+        # OFF by default; when both priors are enabled the policy net wins and
+        # the heuristic serves as its fallback.
+        self.heur_c = float(getattr(cfg, "HEUR_PRIOR_C", 0.0) or 0.0)
 
     # ---- rollout ----
     def _rollout(self, state: dict, me: int) -> float:
@@ -117,6 +141,26 @@ class MCTS:
         except Exception:
             return None
 
+    def _heuristic_priors(self, obs: dict, candidates: list[list[int]]):
+        """Prior over `candidates` from the fast option scorer (L3), or None.
+
+        Single-select candidates `[i]` take option i's score; a pass `[]` scores
+        like an END option. Scores go through a tempered softmax with a uniform
+        floor (see softmax_floor). None on any problem -> plain UCB1.
+        """
+        try:
+            scores = option_scores(obs)
+            if not scores:
+                return None
+            raw = [float(scores[c[0]]) if (len(c) == 1 and 0 <= c[0] < len(scores))
+                   else 3.0  # pass: same baseline as an explicit END option
+                   for c in candidates]
+            return softmax_floor(raw,
+                                 float(getattr(self.cfg, "HEUR_PRIOR_TEMP", 6.0)),
+                                 float(getattr(self.cfg, "HEUR_PRIOR_FLOOR", 0.15)))
+        except Exception:
+            return None
+
     def search(self, obs: dict, candidates: list[list[int]]) -> list[int]:
         """Return the best selection among `candidates` for a single-select decision."""
         me = obs["current"]["yourIndex"]
@@ -125,16 +169,20 @@ class MCTS:
         visits = [0] * n
         values = [0.0] * n
 
-        # Policy prior over the candidates (None unless the opt-in policy is loaded
-        # and produces a usable prior -> falls back to plain UCB1).
-        priors = self._policy_priors(obs, candidates) if self.policy is not None else None
+        # Root prior over the candidates: policy net first (when loaded), then the
+        # heuristic option scorer (when enabled); both unusable -> plain UCB1.
+        priors, prior_c = None, 0.0
+        if self.policy is not None:
+            priors, prior_c = self._policy_priors(obs, candidates), self.puct_c
+        if priors is None and self.heur_c > 0:
+            priors, prior_c = self._heuristic_priors(obs, candidates), self.heur_c
 
         t_end = time.perf_counter() + self.cfg.MOVE_TIME_BUDGET
         sims = 0
         fails = 0
         try:
             while sims < self.cfg.MAX_SIMULATIONS and time.perf_counter() < t_end:
-                ci = (puct_select(visits, values, priors, self.puct_c)
+                ci = (puct_select(visits, values, priors, prior_c)
                       if priors is not None else self._ucb_select(visits, values, sims))
                 try:
                     det = determinize(obs, self.deck, self.rng)

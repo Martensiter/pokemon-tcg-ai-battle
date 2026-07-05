@@ -39,6 +39,17 @@ WEIGHTS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "weights
 # Blend between heuristic and value net at leaves: 0 = pure heuristic, 1 = pure net.
 VALUE_NET_WEIGHT = float(os.environ.get("PTCG_VNET_W", "0.7"))
 
+# --- Heuristic root prior (L3: domain-knowledge search guidance), OPT-IN -------
+# Softmax over policy.option_scores() steers root simulations toward promising
+# arms via PUCT. 0 = OFF (default): plain UCB1, byte-identical to the baseline.
+# Sweep 0.5-3.0 with tools/sweep_config.py --param HEUR_PRIOR_C.
+HEUR_PRIOR_C = float(os.environ.get("PTCG_HEUR_PRIOR_C", "0.0"))
+# Softmax temperature over option scores (higher = flatter prior).
+HEUR_PRIOR_TEMP = float(os.environ.get("PTCG_HEUR_PRIOR_TEMP", "6.0"))
+# Uniform floor mixed into the prior: p = (1-floor)*softmax + floor*uniform.
+# Insurance against a confidently-wrong prior (the policy-net lesson).
+HEUR_PRIOR_FLOOR = float(os.environ.get("PTCG_HEUR_PRIOR_FLOOR", "0.15"))
+
 # --- Behavioral-cloning policy prior (top-agent distillation), OPT-IN ----------
 # Path to the policy-net weights (selfplay/train_policy_np.py). Loaded only when
 # POLICY_PUCT_C > 0; otherwise the agent uses plain UCB1 exactly as before.

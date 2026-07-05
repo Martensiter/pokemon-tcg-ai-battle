@@ -38,6 +38,7 @@ class CardDB:
     def __init__(self):
         self._cards: dict[int, CardData] = {c.cardId: c for c in all_card_data()}
         self._attacks: dict[int, Attack] = {a.attackId: a for a in all_attack()}
+        self._pokemon_values: dict[int, float] = {}  # L1 cache (eval_params-dependent)
 
     # ---- lookups ----
     def card(self, cid: int) -> CardData | None:
@@ -98,6 +99,64 @@ class CardDB:
     def card_type(self, cid: int):
         c = self._cards.get(cid)
         return CardType(c.cardType) if c else None
+
+    # ---- L1: static per-card value (see eval_params for the coefficients) ----
+    def prizes_given(self, cid: int) -> int:
+        """Prize cards the opponent takes for KOing this Pokemon."""
+        c = self._cards.get(cid)
+        if c is None:
+            return 1
+        if c.megaEx:
+            return 3
+        return 2 if c.ex else 1
+
+    def stage_of(self, cid: int) -> int:
+        c = self._cards.get(cid)
+        if c is None or c.basic:
+            return 0
+        return 2 if c.stage2 else 1
+
+    def weighted_attack_cost(self, cid: int, attack: "AttackInfo") -> float:
+        """Energy cost with colorless discounted and off-color pips taxed."""
+        from . import eval_params as EP
+        c = self._cards.get(cid)
+        own = c.energyType if c else None
+        w = 0.0
+        for e in attack.energies:
+            if e == EnergyType.COLORLESS.value:
+                w += EP.COLORLESS_W
+            elif own is not None and e == own:
+                w += 1.0
+            else:
+                w += EP.OFFCOLOR_W
+        return w
+
+    def pokemon_value(self, cid: int) -> float:
+        """Scalar deck-building/board value of a Pokemon card (0 for non-Pokemon).
+
+        value = hp/prizes_given + ATK_EFF_W * best_dmg/(weighted_cost+1)
+                - EVO_COEF * stage + ABILITY_COEF * has_ability
+        Cached per card id; regenerate-free across deck changes.
+        """
+        cached = self._pokemon_values.get(cid)
+        if cached is not None:
+            return cached
+        from . import eval_params as EP
+        c = self._cards.get(cid)
+        if c is None or c.cardType != CardType.POKEMON.value:
+            self._pokemon_values[cid] = 0.0
+            return 0.0
+        hp_term = c.hp / self.prizes_given(cid)
+        best, best_eff = None, 0.0
+        for ai in self.attacks_of(cid):
+            eff = ai.damage / (self.weighted_attack_cost(cid, ai) + 1.0)
+            if eff > best_eff:
+                best, best_eff = ai, eff
+        v = (hp_term + EP.ATK_EFF_W * best_eff
+             - EP.EVO_COEF * self.stage_of(cid)
+             + (EP.ABILITY_COEF if c.skills else 0.0))
+        self._pokemon_values[cid] = v
+        return v
 
 
 @functools.lru_cache(maxsize=1)

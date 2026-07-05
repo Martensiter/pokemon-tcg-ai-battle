@@ -115,8 +115,9 @@ def test_extract_v2_extends_v1():
 def test_greedy_v2_damage_targeting():
     """v2 scorer: pile damage on the opponent's low-HP, high-value mon; when
     forced onto our own board, prefer the least valuable target."""
-    from agent.policy import _score_damage_target, _DMG_PLACE_CTX
-    ctx = next(iter(_DMG_PLACE_CTX))
+    from agent.policy import _score_damage_target
+    from cg.api import SelectContext
+    ctx = SelectContext.DAMAGE_COUNTER_ANY.value
     state = {
         "yourIndex": 0,
         "players": [

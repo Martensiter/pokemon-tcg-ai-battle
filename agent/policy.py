@@ -172,10 +172,28 @@ def _score_card_select(o: dict, ctx: int, state: dict) -> float:
 
 
 # --- v2 targeted scorers (audit-driven; see config.GREEDY_V2) ------------------
+# Every scorer below only uses zones the observation actually reveals (hand /
+# discard / board). Deck-area options are information-blind live (players[me]
+# .deck is None even during searches) so those contexts are deliberately left
+# on v1 behaviour.
 
-_DMG_PLACE_CTX = {SelectContext.DAMAGE.value, SelectContext.DAMAGE_COUNTER.value,
-                  SelectContext.DAMAGE_COUNTER_ANY.value}
 _HEAL_CTX = {SelectContext.HEAL.value, SelectContext.REMOVE_DAMAGE_COUNTER.value}
+
+
+def _v2_score(o: dict, ctx: int, state: dict) -> float | None:
+    """Dispatch to a v2 scorer, or None to fall through to v1 scoring.
+
+    SCOPED to DAMAGE_COUNTER_ANY ("place damage counters anywhere") only. The
+    78-game replay audit proved v1 was already at/above the random baseline
+    everywhere else (DISCARD 86%, DAMAGE_COUNTER 88%, TO_ACTIVE 41%,
+    DISCARD_ENERGY 71%); dispatching v2 scorers there REGRESSED them
+    (86->60, 88->41, 41->18). Only "place damage anywhere" was genuinely below
+    random (15.6% vs 25.2%), and the KO-math scorer fixes it to 67.2%. Do NOT
+    widen this without an audit proving the new context is broken first.
+    """
+    if ctx == SelectContext.DAMAGE_COUNTER_ANY.value:
+        return _score_damage_target(o, ctx, state)
+    return None
 
 
 def _resolve_board_pokemon(o: dict, state: dict):
@@ -219,31 +237,6 @@ def _score_damage_target(o: dict, ctx: int, state: dict) -> float:
     return 5.0 - val / 100.0 + hp / 500.0
 
 
-def _score_fetch(o: dict, state: dict) -> float:
-    """TO_HAND search picks: what does the board actually need right now?"""
-    db = get_db()
-    cid = _card_id_from_option(o, state)
-    if cid is None:
-        return 5.0
-    mp = my_state(state)
-    act = active_of(mp)
-    ct = db.card_type(cid)
-    name = ct.name if ct else ""
-    if name == "POKEMON":
-        base = 9.0 + db.pokemon_value(cid) / 40.0
-        if act is None or len(mp.get("bench") or []) == 0:
-            base += 4.0                          # board needs bodies urgently
-        return base
-    if name in ("BASIC_ENERGY", "SPECIAL_ENERGY"):
-        need = act is not None and total_energy(act) < 3
-        return 10.0 if need else 6.0
-    if name == "SUPPORTER":
-        return 8.0 + max(0, 5 - mp.get("handCount", 0))
-    if name == "ITEM":
-        return 7.5
-    return 6.0
-
-
 def option_scores(obs: dict) -> list[float]:
     sel = obs["select"]
     state = obs["current"]
@@ -253,12 +246,11 @@ def option_scores(obs: dict) -> list[float]:
     v2 = float(getattr(C, "GREEDY_V2", 0.0)) > 0
     scores = []
     for o in opts:
-        if v2 and ctx in _DMG_PLACE_CTX or v2 and ctx in _HEAL_CTX:
-            scores.append(_score_damage_target(o, ctx, state))
-            continue
-        if v2 and ctx == SelectContext.TO_HAND.value:
-            scores.append(_score_fetch(o, state))
-            continue
+        if v2:
+            s2 = _v2_score(o, ctx, state)
+            if s2 is not None:
+                scores.append(s2)
+                continue
         t = o.get("type")
         if t in (OptionType.YES.value, OptionType.NO.value):
             s = _score_yesno(o, ctx)

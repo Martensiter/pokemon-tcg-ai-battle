@@ -60,3 +60,35 @@ def test_roundtrips_through_npz(tmp_path):
         assert f"b{i}" in d
         i += 1
     assert i - 1 == 3
+
+
+def test_early_stopping_stops_and_exports_best():
+    X, y = _separable_data(n=1500)
+    weights, metrics = train_mlp(X, y, hidden=[64, 64], epochs=300, patience=3,
+                                 verbose=False)
+    assert metrics["epochs_run"] < 300                 # actually stopped early
+    assert 1 <= metrics["best_epoch"] <= metrics["epochs_run"]
+    assert metrics["val_acc"] > 0.85                   # still learned the task
+    # export layout unchanged by the rollback to the best epoch
+    assert [k for k in weights] == ["W1", "b1", "W2", "b2", "W3", "b3"]
+    for v in weights.values():
+        assert v.dtype == np.float32
+
+
+def test_patience_zero_keeps_fixed_epochs():
+    X, y = _separable_data(n=500)
+    _, metrics = train_mlp(X, y, hidden=[64, 64], epochs=7, patience=0, verbose=False)
+    assert metrics["epochs_run"] == 7
+    assert metrics["best_epoch"] == 7                  # final weights exported
+
+
+def test_tiny_dataset_with_patience_has_real_val_metrics():
+    # n <= 9 at val_frac=0.1 used to yield an empty val split -> NaN val_loss,
+    # which made early stopping treat every epoch as "no improvement" and
+    # silently truncate training to exactly `patience` epochs.
+    X, y = _separable_data(n=8)
+    weights, metrics = train_mlp(X, y, hidden=[8], epochs=30, patience=10,
+                                 verbose=False)
+    assert np.isfinite(metrics["val_loss"])
+    assert metrics["best_epoch"] >= 1
+    assert [k for k in weights] == ["W1", "b1", "W2", "b2"]

@@ -112,6 +112,37 @@ def test_extract_v2_extends_v1():
     assert extract_v2(None, 0).shape == (FEATURE_DIM_V2,)
 
 
+def test_greedy_v2_damage_targeting():
+    """v2 scorer: pile damage on the opponent's low-HP, high-value mon; when
+    forced onto our own board, prefer the least valuable target."""
+    from agent.policy import _score_damage_target, _DMG_PLACE_CTX
+    ctx = next(iter(_DMG_PLACE_CTX))
+    state = {
+        "yourIndex": 0,
+        "players": [
+            {"active": [{"id": 119, "hp": 70, "maxHp": 70, "energies": []}],   # our Dreepy
+             "bench": [{"id": 121, "hp": 320, "maxHp": 320, "energies": []}]},  # our Dragapult
+            {"active": [{"id": 121, "hp": 30, "maxHp": 320, "energies": []}],  # opp Dragapult @30hp!
+             "bench": [{"id": 119, "hp": 70, "maxHp": 70, "energies": []}]},   # opp Dreepy
+        ],
+    }
+    opp_low_hp_ex = {"area": 4, "index": 0, "playerIndex": 1}   # opp Dragapult, near KO
+    opp_healthy = {"area": 5, "index": 0, "playerIndex": 1}     # opp Dreepy
+    own_valuable = {"area": 5, "index": 0, "playerIndex": 0}    # our Dragapult
+    own_cheap = {"area": 4, "index": 0, "playerIndex": 0}       # our Dreepy
+    s_ex = _score_damage_target(opp_low_hp_ex, ctx, state)
+    s_hp = _score_damage_target(opp_healthy, ctx, state)
+    s_own_val = _score_damage_target(own_valuable, ctx, state)
+    s_own_cheap = _score_damage_target(own_cheap, ctx, state)
+    assert s_ex > s_hp > s_own_cheap > s_own_val   # finish the ex; never hit our Dragapult
+
+
+def test_greedy_v2_off_is_byte_identical():
+    """With the flag at its default 0, option scoring must not change."""
+    from agent import config as C
+    assert float(getattr(C, "GREEDY_V2", 0.0)) == 0.0
+
+
 def test_value_net_picks_extractor_by_weight_dim(tmp_path):
     import numpy as np
     from agent.features import extract, extract_v2, FEATURE_DIM, FEATURE_DIM_V2

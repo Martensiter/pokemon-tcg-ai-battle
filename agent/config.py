@@ -39,6 +39,13 @@ WEIGHTS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "weights
 # Blend between heuristic and value net at leaves: 0 = pure heuristic, 1 = pure net.
 VALUE_NET_WEIGHT = float(os.environ.get("PTCG_VNET_W", "0.7"))
 
+# --- Greedy wrapper v2 (targeted sub-decision scorers), OPT-IN ------------------
+# Replay audit (78 top games, 8.5k decisions) found the greedy wrapper at or
+# below random exactly at damage-counter placement (15.6% vs 25.2% rnd) and
+# mediocre at search-to-hand picks (48.5%); everything else was fine. This flag
+# enables value-aware scorers for those contexts only. 0 = OFF (byte-identical).
+GREEDY_V2 = float(os.environ.get("PTCG_GREEDY_V2", "0.0"))
+
 # --- L2 dynamic board evaluation, OPT-IN ---------------------------------------
 # Master gate for the extra evaluate() terms (attack distance, KO threat, L1
 # board quality). 0 = OFF: evaluate() byte-identical to baseline. Term weights

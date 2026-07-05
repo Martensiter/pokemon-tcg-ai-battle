@@ -171,13 +171,94 @@ def _score_card_select(o: dict, ctx: int, state: dict) -> float:
     return 5.0
 
 
+# --- v2 targeted scorers (audit-driven; see config.GREEDY_V2) ------------------
+
+_DMG_PLACE_CTX = {SelectContext.DAMAGE.value, SelectContext.DAMAGE_COUNTER.value,
+                  SelectContext.DAMAGE_COUNTER_ANY.value}
+_HEAL_CTX = {SelectContext.HEAL.value, SelectContext.REMOVE_DAMAGE_COUNTER.value}
+
+
+def _resolve_board_pokemon(o: dict, state: dict):
+    """(pokemon dict | None, owner index) for an option that targets the board."""
+    pi = o.get("playerIndex")
+    if pi not in (0, 1):
+        pi = state.get("yourIndex", 0)
+    try:
+        pl = state["players"][pi]
+    except (KeyError, IndexError, TypeError):
+        return None, pi
+    area, idx = o.get("area"), o.get("index")
+    if area == 4:  # ACTIVE
+        a = pl.get("active") or []
+        return (a[0] if a and a[0] is not None else None), pi
+    if area == 5 and isinstance(idx, int):  # BENCH
+        b = pl.get("bench") or []
+        if 0 <= idx < len(b) and b[idx] is not None:
+            return b[idx], pi
+    return None, pi
+
+
+def _score_damage_target(o: dict, ctx: int, state: dict) -> float:
+    """Damage-counter placement / healing targets, by KO math and L1 value."""
+    pkm, owner = _resolve_board_pokemon(o, state)
+    if pkm is None:
+        return 5.0
+    db = get_db()
+    me = state.get("yourIndex", 0)
+    hp = pkm.get("hp", 999) or 999
+    val = db.pokemon_value(pkm.get("id"))
+    if ctx in _HEAL_CTX:
+        # heal our own: the more valuable and the more damaged, the better
+        dmg_taken = max(0, (pkm.get("maxHp", hp) or hp) - hp)
+        side = 1.0 if owner == me else -1.0
+        return side * (10.0 + val / 40.0 + dmg_taken / 20.0)
+    # placing damage: pile onto the opponent's nearly-KO'd, high-value mons;
+    # if forced to hit our own board, hurt the least valuable, healthiest one.
+    if owner != me:
+        return 20.0 + max(0.0, 40.0 - hp / 10.0) + val / 40.0
+    return 5.0 - val / 100.0 + hp / 500.0
+
+
+def _score_fetch(o: dict, state: dict) -> float:
+    """TO_HAND search picks: what does the board actually need right now?"""
+    db = get_db()
+    cid = _card_id_from_option(o, state)
+    if cid is None:
+        return 5.0
+    mp = my_state(state)
+    act = active_of(mp)
+    ct = db.card_type(cid)
+    name = ct.name if ct else ""
+    if name == "POKEMON":
+        base = 9.0 + db.pokemon_value(cid) / 40.0
+        if act is None or len(mp.get("bench") or []) == 0:
+            base += 4.0                          # board needs bodies urgently
+        return base
+    if name in ("BASIC_ENERGY", "SPECIAL_ENERGY"):
+        need = act is not None and total_energy(act) < 3
+        return 10.0 if need else 6.0
+    if name == "SUPPORTER":
+        return 8.0 + max(0, 5 - mp.get("handCount", 0))
+    if name == "ITEM":
+        return 7.5
+    return 6.0
+
+
 def option_scores(obs: dict) -> list[float]:
     sel = obs["select"]
     state = obs["current"]
     ctx = sel["context"]
     opts = sel["option"]
+    from . import config as C
+    v2 = float(getattr(C, "GREEDY_V2", 0.0)) > 0
     scores = []
     for o in opts:
+        if v2 and ctx in _DMG_PLACE_CTX or v2 and ctx in _HEAL_CTX:
+            scores.append(_score_damage_target(o, ctx, state))
+            continue
+        if v2 and ctx == SelectContext.TO_HAND.value:
+            scores.append(_score_fetch(o, state))
+            continue
         t = o.get("type")
         if t in (OptionType.YES.value, OptionType.NO.value):
             s = _score_yesno(o, ctx)

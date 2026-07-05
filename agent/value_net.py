@@ -12,7 +12,7 @@ import os
 import numpy as np
 
 from . import config as C
-from .features import extract, FEATURE_DIM
+from .features import extract, extract_v2, FEATURE_DIM, FEATURE_DIM_V2
 from .evaluate import evaluate as heuristic_evaluate
 
 
@@ -24,10 +24,17 @@ def _sigmoid(x):
     return 1.0 / (1.0 + np.exp(-x))
 
 
+# Known feature versions: the input dim of W1 selects the extractor, so v1 and
+# v2 weight files are interchangeable drop-ins for the same agent code.
+_EXTRACTORS = {FEATURE_DIM: extract, FEATURE_DIM_V2: extract_v2}
+
+
 class ValueNet:
-    def __init__(self, layers: list[tuple[np.ndarray, np.ndarray]]):
+    def __init__(self, layers: list[tuple[np.ndarray, np.ndarray]],
+                 extractor=extract):
         # layers: list of (W, b); all but the last use ReLU, the last uses sigmoid
         self.layers = layers
+        self._extract = extractor
 
     @classmethod
     def maybe_load(cls, path: str) -> "ValueNet | None":
@@ -41,9 +48,12 @@ class ValueNet:
                 layers.append((data[f"W{i}"].astype(np.float32),
                                data[f"b{i}"].astype(np.float32)))
                 i += 1
-            if not layers or layers[0][0].shape[0] != FEATURE_DIM:
+            if not layers:
                 return None
-            return cls(layers)
+            extractor = _EXTRACTORS.get(layers[0][0].shape[0])
+            if extractor is None:
+                return None
+            return cls(layers, extractor)
         except Exception:
             return None
 
@@ -58,7 +68,7 @@ class ValueNet:
         """Win-probability mapped to [-1, 1] for player `me`."""
         if state is None:
             return 0.0
-        p = self.forward(extract(state, me))
+        p = self.forward(self._extract(state, me))
         return 2.0 * p - 1.0
 
 

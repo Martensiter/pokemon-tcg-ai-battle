@@ -166,3 +166,78 @@ def extract(state: dict, me: int) -> np.ndarray:
     # actions taken so far this turn (caps the supporter/energy/play sequencing)
     out.append((state.get("turnActionCount", 0) or 0) / 5.0)
     return np.asarray(out, dtype=np.float32)
+
+
+# --- v2: tactical features from the L1/L2 evaluation layers --------------------
+# Appended AFTER the v1 vector, so v1 weight files keep working: the value net
+# picks the extractor by the loaded W1 input dim (FEATURE_DIM = v1, FEATURE_DIM_V2
+# = v2). Unlike the hash features above these need the engine card DB, which the
+# agent already loads at runtime for its greedy policy.
+
+_V2_PLAYER_EXTRAS = 6
+_V2_GLOBAL_EXTRAS = 3
+FEATURE_DIM_V2 = FEATURE_DIM + 2 * _V2_PLAYER_EXTRAS + _V2_GLOBAL_EXTRAS
+
+
+def _v2_player_extras(pl: dict, other: dict, out: list) -> None:
+    from .evaluate import _attack_readiness
+    from .cards import get_db
+    db = get_db()
+    act, op_act = active_of(pl), active_of(other)
+    need, dmg_now = _attack_readiness(act)
+    out.append(min(need, 3) / 3.0)                    # attack distance (energies to go)
+    out.append(min(dmg_now, 400) / 400.0)             # damage available right now
+    ko = 1.0 if (op_act is not None and dmg_now >= (op_act.get("hp") or 10 ** 9)) else 0.0
+    out.append(ko)                                    # KO available right now
+    out.append((db.pokemon_value(act.get("id")) if act else 0.0) / 400.0)   # L1: battle spot
+    bench_v = sum(db.pokemon_value(p.get("id")) for p in (pl.get("bench") or [])
+                  if isinstance(p, dict))
+    out.append(min(bench_v, 1200.0) / 1200.0)         # L1: bench quality
+    if act is not None:
+        c = db.card(act.get("id"))
+        retreat = c.retreatCost if c else 2
+        out.append((total_energy(act) - retreat) / 4.0)   # mobility of the active
+    else:
+        out.append(0.0)
+
+
+def _kos_to_win(pl: dict, other: dict) -> float:
+    """Rough race metric: KOs still needed to clear our remaining prizes,
+    assuming each KO on the opponent's CURRENT active pays its prize count."""
+    from .cards import get_db
+    left = prize_remaining(pl)
+    if left <= 0:
+        return 0.0
+    target = active_of(other)
+    per = get_db().prizes_given(target.get("id")) if target else 1
+    return -(-left // max(per, 1))  # ceil division
+
+
+def extract_v2(state: dict, me: int) -> np.ndarray:
+    """v1 features + L1/L2 tactical extras (attack distance, KO race, quality)."""
+    if state is None:
+        return np.zeros(FEATURE_DIM_V2, dtype=np.float32)
+    from .evaluate import _attack_readiness
+    base = extract(state, me)
+    opp = 1 - me
+    mp = state["players"][me]
+    op = state["players"][opp]
+    out: list = []
+    _v2_player_extras(mp, op, out)
+    _v2_player_extras(op, mp, out)
+    # prize-race differential: fewer KOs-to-win than the opponent = closing faster.
+    my_kos, op_kos = _kos_to_win(mp, op), _kos_to_win(op, mp)
+    out.append((op_kos - my_kos) / 6.0)
+    # "can finish right now" flags for both seats (KO now AND it clears the prizes).
+    from .cards import get_db
+    db = get_db()
+    my_act, op_act = active_of(mp), active_of(op)
+    _, my_dmg = _attack_readiness(my_act)
+    _, op_dmg = _attack_readiness(op_act)
+    my_finish = (op_act is not None and my_dmg >= (op_act.get("hp") or 10 ** 9)
+                 and prize_remaining(mp) <= db.prizes_given(op_act.get("id")))
+    op_finish = (my_act is not None and op_dmg >= (my_act.get("hp") or 10 ** 9)
+                 and prize_remaining(op) <= db.prizes_given(my_act.get("id")))
+    out.append(1.0 if my_finish else 0.0)
+    out.append(1.0 if op_finish else 0.0)
+    return np.concatenate([base, np.asarray(out, dtype=np.float32)])

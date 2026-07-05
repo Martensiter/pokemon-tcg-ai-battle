@@ -40,7 +40,16 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--min-size", type=int, default=5000,
                     help="skip raw json files smaller than this bytes "
                          "(filters incomplete games that never started)")
+    ap.add_argument("--features", choices=("v1", "v2"), default="v1",
+                    help="feature version: v1 = FEATURE_DIM baseline, "
+                         "v2 = +L1/L2 tactical extras (FEATURE_DIM_V2)")
     args = ap.parse_args(argv)
+
+    if args.features == "v2":
+        from agent.features import extract_v2, FEATURE_DIM_V2
+        extractor, feature_dim = extract_v2, FEATURE_DIM_V2
+    else:
+        from agent.features import extract as extractor, FEATURE_DIM as feature_dim
 
     if not os.path.isdir(args.src):
         print(f"no such dir: {args.src}")
@@ -66,7 +75,7 @@ def main(argv: list[str] | None = None) -> int:
             counts["skip_parse_failed"] += 1
             continue
         before = len(rec)
-        added = episode_to_records(ep, rec)
+        added = episode_to_records(ep, rec, extractor=extractor, feature_dim=feature_dim)
         if added > 0:
             counts["ok"] += 1
             groups.extend([ep_idx] * (len(rec) - before))    # mark rows with this episode

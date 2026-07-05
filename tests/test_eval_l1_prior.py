@@ -96,3 +96,41 @@ def test_l2_attack_readiness_math():
     need, dmg_now = _attack_readiness({"id": 121, "hp": 320, "energies": [4, 4]})
     assert need == 0 and dmg_now == 200
     assert _attack_readiness(None) == (99, 0)
+
+
+def test_extract_v2_extends_v1():
+    import numpy as np
+    from agent.features import extract, extract_v2, FEATURE_DIM, FEATURE_DIM_V2
+    st = _fake_state(2, 0)
+    v1 = extract(st, 0)
+    v2 = extract_v2(st, 0)
+    assert v1.shape == (FEATURE_DIM,)
+    assert v2.shape == (FEATURE_DIM_V2,)
+    assert np.allclose(v2[:FEATURE_DIM], v1)      # strict superset of v1
+    assert np.isfinite(v2).all()
+    # None-state fallback keeps the v2 shape too.
+    assert extract_v2(None, 0).shape == (FEATURE_DIM_V2,)
+
+
+def test_value_net_picks_extractor_by_weight_dim(tmp_path):
+    import numpy as np
+    from agent.features import extract, extract_v2, FEATURE_DIM, FEATURE_DIM_V2
+    from agent.value_net import ValueNet
+
+    def fake_weights(path, in_dim):
+        rng = np.random.default_rng(0)
+        np.savez(path, W1=rng.standard_normal((in_dim, 8)).astype(np.float32),
+                 b1=np.zeros(8, np.float32),
+                 W2=rng.standard_normal((8, 1)).astype(np.float32),
+                 b2=np.zeros(1, np.float32))
+
+    p1, p2, p3 = tmp_path / "v1.npz", tmp_path / "v2.npz", tmp_path / "bad.npz"
+    fake_weights(p1, FEATURE_DIM)
+    fake_weights(p2, FEATURE_DIM_V2)
+    fake_weights(p3, 99)
+    assert ValueNet.maybe_load(str(p1))._extract is extract
+    assert ValueNet.maybe_load(str(p2))._extract is extract_v2
+    assert ValueNet.maybe_load(str(p3)) is None   # unknown dim rejected
+    # v2 net produces a sane value end-to-end on a real-ish state.
+    v = ValueNet.maybe_load(str(p2)).value(_fake_state(1, 1), 0)
+    assert -1.0 <= v <= 1.0

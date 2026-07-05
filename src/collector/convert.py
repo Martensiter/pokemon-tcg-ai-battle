@@ -65,21 +65,24 @@ class ValueRecords:
         return X, y
 
 
-def episode_to_records(ep: ParsedEpisode, records: ValueRecords) -> int:
+def episode_to_records(ep: ParsedEpisode, records: ValueRecords,
+                       extractor=extract, feature_dim: int = FEATURE_DIM) -> int:
     """Append value-net rows from one episode. Returns rows added.
 
     Episodes whose winner is unknown are skipped for *value* records (we cannot
     label them) but still produce metadata via :func:`episode_metadata`.
+    ``extractor``/``feature_dim`` default to the v1 pipeline; pass
+    ``agent.features.extract_v2`` + ``FEATURE_DIM_V2`` to build v2 datasets.
     """
     if ep.winner == -1:
         return 0
     added = 0
     for state, me in iter_main_decisions(ep):
         try:
-            feat = extract(state, me)
+            feat = extractor(state, me)
         except Exception:  # noqa: BLE001  (defensive: skip malformed state)
             continue
-        if feat is None or getattr(feat, "shape", (0,))[0] != FEATURE_DIM:
+        if feat is None or getattr(feat, "shape", (0,))[0] != feature_dim:
             continue
         records.add(feat, label_for(ep.winner, me))
         added += 1

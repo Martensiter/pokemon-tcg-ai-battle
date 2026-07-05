@@ -34,11 +34,19 @@ def _sigmoid(z: np.ndarray) -> np.ndarray:
 def train_mlp(X: np.ndarray, y: np.ndarray, hidden: list[int],
               epochs: int = 60, lr: float = 1e-3, batch: int = 512,
               val_frac: float = 0.1, weight_decay: float = 1e-5,
-              seed: int = 0, verbose: bool = True):
+              seed: int = 0, verbose: bool = True,
+              patience: int = 0):
     """Train an MLP [in]+hidden+[1] with Adam + BCE. Returns (weights, metrics).
 
     ``weights`` is the export dict ``{"W1":..,"b1":..,...}`` ready for
-    ``np.savez``; ``metrics`` holds final ``val_loss``/``val_acc``.
+    ``np.savez``; ``metrics`` holds final ``val_loss``/``val_acc`` plus
+    ``best_epoch``/``epochs_run``.
+
+    If ``patience`` > 0, val_loss is checked after every epoch and training
+    stops once it has not improved for ``patience`` consecutive epochs; the
+    exported weights are those of the best epoch, not the last one. With
+    ``patience=0`` the original fixed-``epochs`` behaviour (export final
+    weights) is preserved.
     """
     rng = np.random.default_rng(seed)
     X = X.astype(np.float32)
@@ -50,7 +58,7 @@ def train_mlp(X: np.ndarray, y: np.ndarray, hidden: list[int],
     n_val = int(n * val_frac)
     Xva, yva = X[:n_val], y[:n_val]
     Xtr, ytr = X[n_val:], y[n_val:]
-    if len(Xtr) == 0:                      # tiny datasets: train on everything
+    if len(Xtr) == 0 or len(Xva) == 0:     # tiny datasets: train/validate on everything
         Xtr, ytr, Xva, yva = X, y, X, y
 
     dims = [d] + list(hidden) + [1]
@@ -79,6 +87,21 @@ def train_mlp(X: np.ndarray, y: np.ndarray, hidden: list[int],
             acts.append(h)
         return acts, pre
 
+    def val_metrics():
+        zva = Xva
+        for k in range(L):
+            zva = zva @ Ws[k] + bs[k]
+            if k < L - 1:
+                zva = np.maximum(zva, 0.0)
+        vl = _bce_with_logits(zva, yva)
+        va = float(np.mean((_sigmoid(zva) > 0.5) == (yva > 0.5)))
+        return vl, va
+
+    best_val = np.inf
+    best_epoch = 0
+    best_snapshot = None
+    stale = 0
+    epochs_run = epochs
     for ep in range(epochs):
         idx = rng.permutation(len(Xtr))
         for s in range(0, len(Xtr), batch):
@@ -104,25 +127,32 @@ def train_mlp(X: np.ndarray, y: np.ndarray, hidden: list[int],
                 if k > 0:
                     g = g @ Ws[k].T
                     g = g * (pre[k - 1] > 0)            # ReLU gradient
-        if verbose and ((ep + 1) % 10 == 0 or ep == 0):
-            zva = Xva
-            for k in range(L):
-                zva = zva @ Ws[k] + bs[k]
-                if k < L - 1:
-                    zva = np.maximum(zva, 0.0)
-            vl = _bce_with_logits(zva, yva)
-            va = float(np.mean((_sigmoid(zva) > 0.5) == (yva > 0.5)))
-            if verbose:
+        want_log = verbose and ((ep + 1) % 10 == 0 or ep == 0)
+        if patience > 0 or want_log:
+            vl, va = val_metrics()
+            if want_log:
                 print(f"epoch {ep+1:>3}: val_loss={vl:.4f} val_acc={va:.3f}", flush=True)
+        if patience > 0:
+            if vl < best_val:
+                best_val, best_epoch, stale = vl, ep + 1, 0
+                best_snapshot = ([W.copy() for W in Ws], [b.copy() for b in bs])
+            else:
+                stale += 1
+            if stale >= patience:
+                epochs_run = ep + 1
+                if verbose:
+                    print(f"early stop at epoch {ep+1} "
+                          f"(best epoch {best_epoch}: val_loss={best_val:.4f})", flush=True)
+                break
 
-    # final metrics + export
-    zva = Xva
-    for k in range(L):
-        zva = zva @ Ws[k] + bs[k]
-        if k < L - 1:
-            zva = np.maximum(zva, 0.0)
-    metrics = {"val_loss": _bce_with_logits(zva, yva),
-               "val_acc": float(np.mean((_sigmoid(zva) > 0.5) == (yva > 0.5)))}
+    if best_snapshot is not None:          # roll back to the best-val_loss epoch
+        Ws, bs = best_snapshot
+
+    # final metrics + export (on the exported weights)
+    vl, va = val_metrics()
+    metrics = {"val_loss": vl, "val_acc": va,
+               "best_epoch": best_epoch if best_snapshot is not None else epochs_run,
+               "epochs_run": epochs_run}
     weights = {}
     for k in range(L):
         weights[f"W{k+1}"] = Ws[k].astype(np.float32)   # (in, out) — matches train_value.py
@@ -140,6 +170,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--batch", type=int, default=512)
     ap.add_argument("--val-frac", type=float, default=0.1)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--patience", type=int, default=10,
+                    help="early stopping: stop after N epochs without val_loss "
+                         "improvement and export the best epoch (0 = off)")
     args = ap.parse_args(argv)
 
     d = np.load(args.data)
@@ -148,12 +181,14 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit("no training data")
     print(f"training on {len(y)} states (dim={X.shape[1]}, hidden={args.hidden})")
     weights, metrics = train_mlp(X, y, args.hidden, epochs=args.epochs, lr=args.lr,
-                                 batch=args.batch, val_frac=args.val_frac, seed=args.seed)
+                                 batch=args.batch, val_frac=args.val_frac, seed=args.seed,
+                                 patience=args.patience)
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
     np.savez(args.out, **weights)
     dims = [X.shape[1]] + list(args.hidden) + [1]
     print(f"saved {args.out} (dims={dims}); "
-          f"val_loss={metrics['val_loss']:.4f} val_acc={metrics['val_acc']:.3f}")
+          f"val_loss={metrics['val_loss']:.4f} val_acc={metrics['val_acc']:.3f} "
+          f"(best epoch {metrics['best_epoch']}/{metrics['epochs_run']} run)")
     return 0
 
 

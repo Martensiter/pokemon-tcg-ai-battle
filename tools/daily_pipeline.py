@@ -118,7 +118,7 @@ def _value_xy(data_dir: Path, log):
 def run_pipeline(data_dir: str | os.PathLike[str], *, hidden: list[int],
                  epochs: int, min_rows: int, publish: bool, dataset_slug: str,
                  state_dir: str | os.PathLike[str] | None = None,
-                 logger=None) -> dict:
+                 patience: int = 10, logger=None) -> dict:
     """One pass: merge -> train -> write candidate weights -> (optional) publish.
 
     Returns a summary dict. Never raises on "not enough data yet" -- it logs and
@@ -137,7 +137,8 @@ def run_pipeline(data_dir: str | os.PathLike[str], *, hidden: list[int],
                min_rows=min_rows)
         return {"trained": False, "rows": int(len(y))}
 
-    weights, metrics = train_mlp(X, y, hidden, epochs=epochs, verbose=False)
+    weights, metrics = train_mlp(X, y, hidden, epochs=epochs, verbose=False,
+                                 patience=patience)
 
     wdir = data_dir / "weights"
     wdir.mkdir(parents=True, exist_ok=True)
@@ -151,6 +152,8 @@ def run_pipeline(data_dir: str | os.PathLike[str], *, hidden: list[int],
         "hidden": list(hidden),
         "val_loss": round(metrics["val_loss"], 4),
         "val_acc": round(metrics["val_acc"], 4),
+        "best_epoch": int(metrics["best_epoch"]),
+        "epochs_run": int(metrics["epochs_run"]),
         "mean_label": round(float(y.mean()), 4),
     }
     (wdir / "train_report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
@@ -176,6 +179,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--data-dir", default=str(cfg.data_dir))
     ap.add_argument("--hidden", type=int, nargs="+", default=[64, 64])
     ap.add_argument("--epochs", type=int, default=60)
+    ap.add_argument("--patience", type=int, default=10,
+                    help="early stopping patience for the value-net trainer (0 = off)")
     ap.add_argument("--min-rows", type=int, default=2000,
                     help="skip retraining until at least this many states are collected")
     ap.add_argument("--publish", action="store_true",
@@ -195,7 +200,8 @@ def main(argv: list[str] | None = None) -> int:
             return run_pipeline(args.data_dir, hidden=args.hidden, epochs=args.epochs,
                                 min_rows=args.min_rows, publish=args.publish,
                                 dataset_slug=args.dataset_slug,
-                                state_dir=cfg.state_dir, logger=log)
+                                state_dir=cfg.state_dir, patience=args.patience,
+                                logger=log)
         except Exception as e:  # noqa: BLE001  (never let the loop die)
             log_kv(log, "pipeline_error", level=40, err=f"{type(e).__name__}: {e}")
             return {"trained": False, "error": str(e)}

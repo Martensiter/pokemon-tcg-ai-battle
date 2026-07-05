@@ -35,12 +35,19 @@ def train_mlp(X: np.ndarray, y: np.ndarray, hidden: list[int],
               epochs: int = 60, lr: float = 1e-3, batch: int = 512,
               val_frac: float = 0.1, weight_decay: float = 1e-5,
               seed: int = 0, verbose: bool = True,
-              patience: int = 0):
+              groups: np.ndarray | None = None, patience: int = 0):
     """Train an MLP [in]+hidden+[1] with Adam + BCE. Returns (weights, metrics).
 
     ``weights`` is the export dict ``{"W1":..,"b1":..,...}`` ready for
     ``np.savez``; ``metrics`` holds final ``val_loss``/``val_acc`` plus
     ``best_epoch``/``epochs_run``.
+
+    If ``groups`` (one group id per row, e.g. episode_id) is given, the train/val
+    split is done at the GROUP level so states from the same episode never appear
+    in both sets -- this is critical for an honest val_acc on ladder replays where
+    consecutive states in one game are highly correlated. Without ``groups``,
+    falls back to the original row-level shuffle (kept for back-compat with
+    synthetic-data tests).
 
     If ``patience`` > 0, val_loss is checked after every epoch and training
     stops once it has not improved for ``patience`` consecutive epochs; the
@@ -53,11 +60,20 @@ def train_mlp(X: np.ndarray, y: np.ndarray, hidden: list[int],
     y = y.astype(np.float32).reshape(-1, 1)
     n, d = X.shape
 
-    perm = rng.permutation(n)
-    X, y = X[perm], y[perm]
-    n_val = int(n * val_frac)
-    Xva, yva = X[:n_val], y[:n_val]
-    Xtr, ytr = X[n_val:], y[n_val:]
+    if groups is not None and len(groups) == n:
+        # episode-aware split: held-out games never leak into training.
+        unique = np.unique(groups)
+        n_val_g = max(1, int(round(len(unique) * val_frac)))
+        val_g = set(unique[rng.permutation(len(unique))[:n_val_g]].tolist())
+        mask_val = np.isin(groups, list(val_g))
+        Xva, yva = X[mask_val], y[mask_val]
+        Xtr, ytr = X[~mask_val], y[~mask_val]
+    else:
+        perm = rng.permutation(n)
+        X, y = X[perm], y[perm]
+        n_val = int(n * val_frac)
+        Xva, yva = X[:n_val], y[:n_val]
+        Xtr, ytr = X[n_val:], y[n_val:]
     if len(Xtr) == 0 or len(Xva) == 0:     # tiny datasets: train/validate on everything
         Xtr, ytr, Xva, yva = X, y, X, y
 
@@ -177,12 +193,14 @@ def main(argv: list[str] | None = None) -> int:
 
     d = np.load(args.data)
     X, y = d["X"], d["y"]
+    groups = d["group"] if "group" in d.files else None
     if len(y) == 0:
         raise SystemExit("no training data")
-    print(f"training on {len(y)} states (dim={X.shape[1]}, hidden={args.hidden})")
+    split = f"episode-aware ({len(np.unique(groups))} groups)" if groups is not None else "row-shuffle"
+    print(f"training on {len(y)} states (dim={X.shape[1]}, hidden={args.hidden}, split={split})")
     weights, metrics = train_mlp(X, y, args.hidden, epochs=args.epochs, lr=args.lr,
                                  batch=args.batch, val_frac=args.val_frac, seed=args.seed,
-                                 patience=args.patience)
+                                 groups=groups, patience=args.patience)
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
     np.savez(args.out, **weights)
     dims = [X.shape[1]] + list(args.hidden) + [1]

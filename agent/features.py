@@ -21,22 +21,23 @@ from .observation import active_of, in_play, prize_remaining, total_energy, n_co
 # Hash widths chosen modestly (data is ~8k samples; small dim avoids overfit).
 _ACTIVE_ID_DIM = 8     # active Pokemon id, hashed one-hot per player (visible both seats)
 _BENCH_ID_DIM = 8      # bench Pokemon ids, hashed accumulator (visible both seats)
-# Hand is OCCLUDED for the non-acting seat -- including a per-player hand_id hash
-# silently flips train/inference distributions, because at training the replay
-# observation is always from the actor's view (own hand visible / opp None) but at
-# inference MCTS rollouts evaluate opp-turn leaves ~55% of the time, swapping the
-# orientation. The value net then sees an OOD pattern at most leaves. Removed for
-# correctness; a perspective-invariant rewrite (per acting/non-acting, not per
-# seat) is the right longer-term move.
-_HAND_ID_DIM = 0
 _DISCARD_ID_DIM = 8    # discard pile card ids (public, visible both seats)
 _ENERGY_TYPE_DIM = 6   # rough energy-type histogram per player (board energies are public)
 _STADIUM_DIM = 4       # stadium card id, hashed one-hot (global)
+# Acting-seat hand: stored ONCE at the global block (not per-player), so it stays
+# perspective-invariant. The engine returns observations from the to-move seat's
+# view, where ``state["players"][yourIndex]["hand"]`` is visible (and the other
+# seat's is None). Keying the hash on the acting seat -- not on the original me --
+# means MCTS opp-turn leaves see the *opp's* hand here, exactly as training data
+# from opp's MAIN decisions did. So the model sees the same distribution at
+# training and at any leaf, regardless of whose turn it is.
+_ACTING_HAND_DIM = 8
 
 # 13 (originals) + (active_id, bench_id, discard_id, energy_type) + 5 scalars
 _PLAYER_FEATS = (13 + _ACTIVE_ID_DIM + _BENCH_ID_DIM
                  + _DISCARD_ID_DIM + _ENERGY_TYPE_DIM + 5)
-_GLOBAL_FEATS = 6 + _STADIUM_DIM + 2                       # +stadium +(firstPlayer, turnActionCount)
+_GLOBAL_FEATS = (6 + _STADIUM_DIM + 2                       # +stadium +(firstPlayer, turnActionCount)
+                 + _ACTING_HAND_DIM + 1)                    # +acting-hand +acting==me flag
 FEATURE_DIM = 2 * _PLAYER_FEATS + _GLOBAL_FEATS
 
 
@@ -148,6 +149,18 @@ def extract(state: dict, me: int) -> np.ndarray:
     stadium = state.get("stadium")
     sid = stadium.get("id") if isinstance(stadium, dict) else None
     _hash_add(sid, _STADIUM_DIM, out)
+    # ACTING-seat hand: keyed on yourIndex (the visible hand), NOT on me. This
+    # makes the feature perspective-invariant -- the acting seat's hand is the
+    # one the replay observation revealed at training time and is also the only
+    # hand visible at MCTS leaves, regardless of which seat is to-move.
+    acting = state.get("yourIndex", me)
+    acting_hand = (state["players"][acting].get("hand")
+                   if 0 <= acting < len(state.get("players") or []) else None) or []
+    _hash_accumulate([h.get("id") for h in acting_hand if isinstance(h, dict)],
+                     _ACTING_HAND_DIM, out)
+    # "is the acting seat me?" -- lets the net learn that acting-hand is mine
+    # when this flag is 1 and theirs when 0 (so it can use the same block both ways).
+    out.append(1.0 if acting == me else 0.0)
     # first-player advantage flag
     out.append(1.0 if state.get("firstPlayer") == me else 0.0)
     # actions taken so far this turn (caps the supporter/energy/play sequencing)

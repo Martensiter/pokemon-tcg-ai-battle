@@ -39,6 +39,12 @@ WEIGHTS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "weights
 # Blend between heuristic and value net at leaves: 0 = pure heuristic, 1 = pure net.
 VALUE_NET_WEIGHT = float(os.environ.get("PTCG_VNET_W", "0.7"))
 
+# --- L2 dynamic board evaluation, OPT-IN ---------------------------------------
+# Master gate for the extra evaluate() terms (attack distance, KO threat, L1
+# board quality). 0 = OFF: evaluate() byte-identical to baseline. Term weights
+# live in agent/eval_params.py. Sweep: --param L2_W --values 0.5,1.0,2.0.
+L2_W = float(os.environ.get("PTCG_L2_W", "0.0"))
+
 # --- Heuristic root prior (L3: domain-knowledge search guidance), OPT-IN -------
 # Softmax over policy.option_scores() steers root simulations toward promising
 # arms via PUCT. 0 = OFF (default): plain UCB1, byte-identical to the baseline.

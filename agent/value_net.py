@@ -66,9 +66,12 @@ def make_leaf_evaluator(cfg=C):
     """Return eval_fn(state, me) -> [-1, 1], blending heuristic + value net."""
     net = ValueNet.maybe_load(cfg.WEIGHTS_PATH)
     w = cfg.VALUE_NET_WEIGHT if net is not None else 0.0
+    # L2 gate resolved from cfg so tools/sweep_config.py can vary it per agent;
+    # None (attr absent) defers to eval_params.L2_W (env-overridable, default 0).
+    l2_w = getattr(cfg, "L2_W", None)
 
     def eval_fn(state: dict, me: int) -> float:
-        h = heuristic_evaluate(state, me)
+        h = heuristic_evaluate(state, me, l2_w=l2_w)
         if net is None:
             return h
         return (1.0 - w) * h + w * net.value(state, me)

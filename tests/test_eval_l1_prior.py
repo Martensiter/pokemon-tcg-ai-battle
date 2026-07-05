@@ -60,3 +60,39 @@ def test_prizes_given_tiers():
     # Any megaEx in the pool gives 3 prizes.
     mega = next(cid for cid, c in db.all_cards().items() if c.megaEx)
     assert db.prizes_given(mega) == 3
+
+
+def _fake_state(my_energies=0, op_energies=0):
+    def pkm(cid, hp, n_energy):
+        return {"id": cid, "hp": hp, "maxHp": hp, "energies": [4] * n_energy}
+    return {
+        "yourIndex": 0,
+        "result": -1,
+        "players": [
+            {"active": [pkm(121, 320, my_energies)], "bench": [pkm(119, 70, 0)],
+             "prize": [0] * 6, "handCount": 5},
+            {"active": [pkm(121, 320, op_energies)], "bench": [],
+             "prize": [0] * 6, "handCount": 5},
+        ],
+    }
+
+
+def test_l2_off_by_default_and_changes_eval_when_on():
+    from agent import config as C
+    from agent.evaluate import evaluate
+    st = _fake_state(my_energies=2, op_energies=0)  # we can attack, they cannot
+    assert float(getattr(C, "L2_W", 0.0)) == 0.0    # baseline gate closed
+    base = evaluate(st, 0)                          # default: L2 off
+    assert evaluate(st, 0, l2_w=0.0) == base
+    # Attack-ready with a KO-capable Dragapult vs an empty one: L2 must help.
+    assert evaluate(st, 0, l2_w=1.0) > base
+
+
+def test_l2_attack_readiness_math():
+    from agent.evaluate import _attack_readiness
+    # Dragapult ex: Jet Headbutt cost 1, Phantom Dive cost 2.
+    need, dmg_now = _attack_readiness({"id": 121, "hp": 320, "energies": []})
+    assert need == 1 and dmg_now == 0
+    need, dmg_now = _attack_readiness({"id": 121, "hp": 320, "energies": [4, 4]})
+    assert need == 0 and dmg_now == 200
+    assert _attack_readiness(None) == (99, 0)

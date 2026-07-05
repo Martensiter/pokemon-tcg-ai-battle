@@ -13,7 +13,8 @@ Kaggle「Pokémon TCG AI Battle」用の、**実ラダー対戦リプレイを24
 - ✅ **収集は本番稼働中**。SwitchBot AI Hub 上で OpenClaw cron が30分毎に収集、4:00 UTC に日次再学習。
 - ✅ 実データ **51エピソード / 5,642学習局面 / 生リプレイ51件** を取得済み。
 - ✅ データ＋候補weights＋**manifest** を **プライベート Kaggle Dataset** に自動公開（デバイス全損でも復元可）。
-- 🔜 残：①**初提出**（現行ベースラインを1回・人手/OAuth＝ボードに載せる）②cronのdelivery=none化 ③データ蓄積→検証→再提出。**監視は Kaggle Dataset の更新日を見るだけでOK**（専用監視は不要）。
+- ✅ **初提出は実施済み**（現行ベースライン提出＝実測 **567.5**、Agent Logs 診断も正常。§5a/§5b・[`DECISIONS.md`](DECISIONS.md) #28）。
+- 🔜 残：①cron の delivery=none 化 ②データ蓄積→検証→再提出。**監視は Kaggle Dataset の更新日を見るだけでOK**（専用監視は不要）。
 
 ---
 
@@ -210,8 +211,11 @@ kaggle competitions submit -c pokemon-tcg-ai-battle \
 > ブラウザで `kaggle.com/competitions/pokemon-tcg-ai-battle/submit` から `submission_*.tar.gz` を**手動アップロード**。
 > （`datasets download` 側は逆に `kaggle<1.7` の legacy auth で通る — §4 参照。）
 
-> **提出方針（現時点の推奨）**：まず **現行ベースライン（`agent/weights.npz` ＋ `deck_cand_hops_hybrid_v2.csv`）を
-> 1回だけ提出してボードに載せる**のが正解。まだ誰も出していないので「在席」する価値が高い。既知動作の bundle で低リスク（**初回提出の実測は 567.5**。過去の自己申告 WRITEUP=v2 1127.8 / README=baseline 948 は**小サンプル・別メタ・未検証**なので過信しない）。
+> **状況更新（重要）**：下記「まず1回だけ提出してボードに載せる」は **既に実施済み**（初回提出＝実測 **567.5**・§5b）。
+> 以下は当時の提出方針の背景として残す。次の一手は §5b（スコアを上げる手）と §6 の②③。
+>
+> **提出方針（当初の推奨）**：まず **現行ベースライン（`agent/weights.npz` ＋ `deck_cand_hops_hybrid_v2.csv`）を
+> 1回だけ提出してボードに載せる**のが正解だった。既知動作の bundle で低リスク（**初回提出の実測は 567.5**。過去の自己申告 WRITEUP=v2 1127.8 / README=baseline 948 は**小サンプル・別メタ・未検証**なので過信しない）。
 > これは `kaggle auth login`（OAuth）かブラウザ手動アップロードの **人手1回**で済む（②③だけ実施＝検証スキップでも可、ベースラインは既知良）。
 > **ループからの自動提出は当面オフ**：理由は ①`competitions submit` が **OAuth 必須で無人化できない**、
 > ②候補modelはまだ baseline を超えない（データ少量で verify が FAIL ＝ 出しても無意味）。
@@ -244,7 +248,7 @@ kaggle competitions submit -c pokemon-tcg-ai-battle \
 ---
 
 ## 6. 残TODO（優先順）
-1. **初提出（ボードに載せる）**：現行ベースラインを1回 submit（人手・OAuth/ブラウザ）。手順は **[`docs/SUBMIT_BASELINE.md`](SUBMIT_BASELINE.md)**（コピペ可）。まだ誰も出していないので最優先・低リスク。
+1. ~~**初提出（ボードに載せる）**~~ → **実施済み**（初回提出＝実測 567.5・§5b）。[`docs/SUBMIT_BASELINE.md`](SUBMIT_BASELINE.md) は今後の再提出／別マシン提出の手順として参照。
 2. **cron delivery=none**（Control UIで両ジョブ編集）— エラーログ止め。収集自体は無影響。
 3. **データ蓄積を待つ**（放置でOK、新着エピソードが増える）。
 4. **MacBookをengine機化**（§4：`libcg.dylib`→`cg/libcg.so` ＋ `xattr -d com.apple.quarantine` → `engine OK (native)`）。

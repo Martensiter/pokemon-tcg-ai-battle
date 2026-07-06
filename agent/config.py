@@ -67,6 +67,12 @@ HEUR_PRIOR_FLOOR = float(os.environ.get("PTCG_HEUR_PRIOR_FLOOR", "0.15"))
 # Path to the policy-net weights (selfplay/train_policy_np.py). Loaded only when
 # POLICY_PUCT_C > 0; otherwise the agent uses plain UCB1 exactly as before.
 POLICY_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "policy.npz")
+# Rollout policy (distinct from the root prior above). Uses the behavioral-
+# cloning net as the PLAYOUT policy inside rollouts, where greedy currently
+# only matches top players 17.6% of the time (MAIN). The prior use of this net
+# failed (a weak prior distorts search); rollout use is a different mechanism
+# and untested. 0 = OFF (greedy playout, byte-identical baseline). Sweep 1.0.
+ROLLOUT_POLICY_C = float(os.environ.get("PTCG_ROLLOUT_POLICY_C", "0.0"))
 # PUCT exploration coefficient for the policy prior at the MCTS root. 0 = OFF
 # (default): no prior, no behavior change. Tune (e.g. 1.0-3.0) + verify on the
 # engine machine before shipping. Env override: PTCG_POLICY_PUCT_C.

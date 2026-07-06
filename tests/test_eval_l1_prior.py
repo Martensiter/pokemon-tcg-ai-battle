@@ -144,6 +144,30 @@ def test_greedy_v2_off_is_byte_identical():
     assert float(getattr(C, "GREEDY_V2", 0.0)) == 0.0
 
 
+def test_rollout_policy_off_by_default():
+    """ROLLOUT_POLICY_C defaults to 0 so playout stays greedy (baseline)."""
+    from agent import config as C
+    assert float(getattr(C, "ROLLOUT_POLICY_C", 0.0)) == 0.0
+
+
+def test_rollout_policy_wired_only_when_enabled():
+    """MCTS loads a rollout policy only when ROLLOUT_POLICY_C > 0."""
+    import types
+    import random
+    from agent.mcts import MCTS
+    from agent import config as C
+    off = MCTS([1] * 60, random.Random(0), cfg=C)
+    assert off.rollout_policy is None          # default: greedy playout
+    on_cfg = types.SimpleNamespace(**{k: getattr(C, k) for k in dir(C)
+                                      if k.isupper()})
+    on_cfg.ROLLOUT_POLICY_C = 1.0
+    on = MCTS([1] * 60, random.Random(0), cfg=on_cfg)
+    # loads iff policy.npz exists; if present it's a PolicyNet, else None
+    import os
+    if os.path.exists(getattr(C, "POLICY_PATH", "")):
+        assert on.rollout_policy is not None
+
+
 def test_value_net_picks_extractor_by_weight_dim(tmp_path):
     import numpy as np
     from agent.features import extract, extract_v2, FEATURE_DIM, FEATURE_DIM_V2

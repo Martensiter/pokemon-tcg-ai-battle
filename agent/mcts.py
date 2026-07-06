@@ -19,7 +19,7 @@ import random
 
 from cg import api
 from cg.sim import lib
-from cg.api import to_observation_class
+from cg.api import to_observation_class, SelectContext
 
 from . import config as C
 from .determinize import determinize
@@ -81,8 +81,36 @@ class MCTS:
         # OFF by default; when both priors are enabled the policy net wins and
         # the heuristic serves as its fallback.
         self.heur_c = float(getattr(cfg, "HEUR_PRIOR_C", 0.0) or 0.0)
+        # Opt-in rollout policy: the BC net as the PLAYOUT policy (distinct from
+        # the root prior). OFF by default -> greedy playout, unchanged baseline.
+        self.rollout_c = float(getattr(cfg, "ROLLOUT_POLICY_C", 0.0) or 0.0)
+        self.rollout_policy = (PolicyNet.maybe_load(getattr(cfg, "POLICY_PATH", ""))
+                               if self.rollout_c > 0 else None)
 
     # ---- rollout ----
+    def _rollout_choose(self, obs: dict) -> list[int]:
+        """Playout move: policy net for single-select MAIN, greedy otherwise.
+
+        The net only covers single-select MAIN decisions (its training domain);
+        everything else (multi-select, sub-decisions) falls back to the greedy
+        playout policy. Epsilon still injects exploration so rollouts don't
+        collapse to one deterministic line.
+        """
+        try:
+            sel = obs.get("select") or {}
+            options = sel.get("option") or []
+            if (sel.get("context") == SelectContext.MAIN.value
+                    and sel.get("maxCount") == 1 and len(options) >= 2
+                    and self.rng.random() >= self.cfg.ROLLOUT_EPSILON):
+                cur = obs.get("current") or {}
+                me = cur.get("yourIndex")
+                probs = self.rollout_policy.priors(cur, me, options)
+                if probs is not None and len(probs) == len(options):
+                    return [max(range(len(probs)), key=lambda i: probs[i])]
+        except Exception:
+            pass
+        return policy_choose(obs, rng=self.rng, epsilon=self.cfg.ROLLOUT_EPSILON)
+
     def _rollout(self, state: dict, me: int) -> float:
         sid = state["searchId"]
         obs = state["observation"]
@@ -93,7 +121,8 @@ class MCTS:
             sel = obs.get("select")
             if sel is None:
                 break
-            choice = policy_choose(obs, rng=self.rng, epsilon=self.cfg.ROLLOUT_EPSILON)
+            choice = (self._rollout_choose(obs) if self.rollout_policy is not None
+                      else policy_choose(obs, rng=self.rng, epsilon=self.cfg.ROLLOUT_EPSILON))
             state = _step_dict(sid, choice)
             sid = state["searchId"]
             obs = state["observation"]

@@ -14,3 +14,6 @@ Quick reminders:
 - Do not rewrite/break `agent/`, the value net, or existing tests. Keep the MIT
   LICENSE and copyright notices.
 - Run `uv run pytest tests/collector` (mock-only, no network) before committing.
+- Task queue: register incoming tasks with
+  `python scripts/claude/manage_tasks.py add "description"` and mark them
+  `complete <id>` when done — the SessionStart hook lists pending tasks.

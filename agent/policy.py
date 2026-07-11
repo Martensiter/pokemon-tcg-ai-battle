@@ -14,6 +14,37 @@ from .cards import get_db
 from .observation import my_state, opp_state, active_of, total_energy
 from .evaluate import attack_damage_estimate
 
+# --- hot-path enum constants -----------------------------------------------
+# OptionType/SelectContext attribute access dominated profiles (30M enum
+# __get__ calls per game); the .value ints are stable, so hoist them once.
+_T_YES = OptionType.YES.value
+_T_NO = OptionType.NO.value
+_T_CARD = OptionType.CARD.value
+_T_TOOL_CARD = OptionType.TOOL_CARD.value
+_T_ENERGY_CARD = OptionType.ENERGY_CARD.value
+_T_ENERGY = OptionType.ENERGY.value
+_T_NUMBER = OptionType.NUMBER.value
+_T_SPECIAL_CONDITION = OptionType.SPECIAL_CONDITION.value
+_T_SKILL = OptionType.SKILL.value
+_T_ATTACK = OptionType.ATTACK.value
+_T_PLAY = OptionType.PLAY.value
+_T_ATTACH = OptionType.ATTACH.value
+_T_ABILITY = OptionType.ABILITY.value
+_T_EVOLVE = OptionType.EVOLVE.value
+_T_RETREAT = OptionType.RETREAT.value
+_T_DISCARD = OptionType.DISCARD.value
+_T_END = OptionType.END.value
+_C_MULLIGAN = SelectContext.MULLIGAN.value
+_C_IS_FIRST = SelectContext.IS_FIRST.value
+_C_SETUP_ACTIVE = SelectContext.SETUP_ACTIVE_POKEMON.value
+_C_TO_ACTIVE = SelectContext.TO_ACTIVE.value
+_C_SETUP_BENCH = SelectContext.SETUP_BENCH_POKEMON.value
+_C_TO_BENCH = SelectContext.TO_BENCH.value
+_C_TO_FIELD = SelectContext.TO_FIELD.value
+_C_RDCC = SelectContext.REMOVE_DAMAGE_COUNTER_COUNT.value
+_C_DC = SelectContext.DAMAGE_COUNTER.value
+_C_DCA = SelectContext.DAMAGE_COUNTER_ANY.value
+
 # Contexts where selecting MORE is good (take the max count).
 _BENEFICIAL_COUNT = {
     SelectContext.DRAW_COUNT.value,
@@ -122,31 +153,31 @@ def _score_attach(o: dict, state: dict) -> float:
 
 def _score_main_option(o: dict, state: dict) -> float:
     t = o.get("type")
-    if t == OptionType.ATTACK.value:
+    if t == _T_ATTACK:
         return _score_attack(o, state)
-    if t == OptionType.PLAY.value:
+    if t == _T_PLAY:
         return _score_play(o, state)
-    if t == OptionType.ATTACH.value:
+    if t == _T_ATTACH:
         return _score_attach(o, state)
-    if t == OptionType.ABILITY.value:
+    if t == _T_ABILITY:
         return 10.0
-    if t == OptionType.EVOLVE.value:
+    if t == _T_EVOLVE:
         return 11.0
-    if t == OptionType.RETREAT.value:
+    if t == _T_RETREAT:
         return 2.0
-    if t == OptionType.DISCARD.value:
+    if t == _T_DISCARD:
         return 1.0
-    if t == OptionType.END.value:
+    if t == _T_END:
         return 3.0  # baseline: act if anything useful exists, else end
     return 4.0
 
 
 def _score_yesno(o: dict, ctx: int) -> float:
-    is_yes = (o.get("type") == OptionType.YES.value)
+    is_yes = (o.get("type") == _T_YES)
     # default YES for beneficial activations; specific contexts overridden below
-    if ctx == SelectContext.MULLIGAN.value:
+    if ctx == _C_MULLIGAN:
         return 1.0 if not is_yes else 0.0          # keep hand
-    if ctx == SelectContext.IS_FIRST.value:
+    if ctx == _C_IS_FIRST:
         return 1.0 if is_yes else 0.0              # go first
     # ACTIVATE / FIRST_EFFECT / COIN_HEAD / others: prefer YES
     return 1.0 if is_yes else 0.0
@@ -157,15 +188,14 @@ def _score_card_select(o: dict, ctx: int, state: dict) -> float:
     db = get_db()
     cid = _card_id_from_option(o, state)
     # Setup / put-into-play: choose the best, most energy-efficient attacker.
-    if ctx in (SelectContext.SETUP_ACTIVE_POKEMON.value, SelectContext.TO_ACTIVE.value):
+    if ctx in (_C_SETUP_ACTIVE, _C_TO_ACTIVE):
         if cid is not None:
             a = db.best_attack(cid)
             if a:
                 # lower cost online sooner; some weight on damage
                 return 20.0 - 3.0 * a.cost + a.damage / 50.0
         return 5.0
-    if ctx in (SelectContext.SETUP_BENCH_POKEMON.value, SelectContext.TO_BENCH.value,
-               SelectContext.TO_FIELD.value):
+    if ctx in (_C_SETUP_BENCH, _C_TO_BENCH, _C_TO_FIELD):
         return 10.0
     # Damage / KO targeting: prefer the opponent's strongest (handled by sign of count)
     return 5.0
@@ -180,6 +210,26 @@ def _score_card_select(o: dict, ctx: int, state: dict) -> float:
 _HEAL_CTX = {SelectContext.HEAL.value, SelectContext.REMOVE_DAMAGE_COUNTER.value}
 
 
+def _v3_score(o: dict, ctx: int, state: dict, rdcc: bool = True, dc: bool = True) -> float | None:
+    """v3 scorers (2026-07-07 audit-driven; see config.GREEDY_V3), or None.
+
+    SCOPED to the two contexts the fresh 5.3k-game audit proved broken:
+    - REMOVE_DAMAGE_COUNTER_COUNT: tops pick the MINIMUM count 83% of the time
+      (our beneficial-count max rule agreed only 5.5%, far below random 35.7%).
+      Score = -number so the smallest count ranks first.
+    - DAMAGE_COUNTER: damage placement needs the same KO-math targeting that
+      fixed DAMAGE_COUNTER_ANY (8.4% agree vs 22.2% random without it).
+    """
+    if rdcc and ctx == _C_RDCC:
+        n = o.get("number")
+        if n is not None:
+            return -float(n)
+        return None
+    if dc and ctx == _C_DC:
+        return _score_damage_target(o, ctx, state)
+    return None
+
+
 def _v2_score(o: dict, ctx: int, state: dict) -> float | None:
     """Dispatch to a v2 scorer, or None to fall through to v1 scoring.
 
@@ -191,7 +241,7 @@ def _v2_score(o: dict, ctx: int, state: dict) -> float | None:
     random (15.6% vs 25.2%), and the KO-math scorer fixes it to 67.2%. Do NOT
     widen this without an audit proving the new context is broken first.
     """
-    if ctx == SelectContext.DAMAGE_COUNTER_ANY.value:
+    if ctx == _C_DCA:
         return _score_damage_target(o, ctx, state)
     return None
 
@@ -244,25 +294,33 @@ def option_scores(obs: dict) -> list[float]:
     opts = sel["option"]
     from . import config as C
     v2 = float(getattr(C, "GREEDY_V2", 0.0)) > 0
+    v3 = float(getattr(C, "GREEDY_V3", 0.0)) > 0
+    v3_rdcc = v3 or float(getattr(C, "GREEDY_V3_RDCC", 0.0)) > 0
+    v3_dc = v3 or float(getattr(C, "GREEDY_V3_DC", 0.0)) > 0
     scores = []
     for o in opts:
+        if v3_rdcc or v3_dc:
+            s3 = _v3_score(o, ctx, state, rdcc=v3_rdcc, dc=v3_dc)
+            if s3 is not None:
+                scores.append(s3)
+                continue
         if v2:
             s2 = _v2_score(o, ctx, state)
             if s2 is not None:
                 scores.append(s2)
                 continue
         t = o.get("type")
-        if t in (OptionType.YES.value, OptionType.NO.value):
+        if t in (_T_YES, _T_NO):
             s = _score_yesno(o, ctx)
-        elif t in (OptionType.CARD.value, OptionType.TOOL_CARD.value, OptionType.ENERGY_CARD.value):
+        elif t in (_T_CARD, _T_TOOL_CARD, _T_ENERGY_CARD):
             s = _score_card_select(o, ctx, state)
-        elif t == OptionType.ENERGY.value:
+        elif t == _T_ENERGY:
             s = 5.0
-        elif t == OptionType.NUMBER.value:
+        elif t == _T_NUMBER:
             s = float(o.get("number") or 0)
-        elif t == OptionType.SPECIAL_CONDITION.value:
+        elif t == _T_SPECIAL_CONDITION:
             s = 5.0
-        elif t == OptionType.SKILL.value:
+        elif t == _T_SKILL:
             s = 5.0
         else:
             s = _score_main_option(o, state)

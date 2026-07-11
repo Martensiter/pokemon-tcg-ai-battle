@@ -79,15 +79,156 @@ def _l2_terms(mp: dict, op: dict) -> float:
             + EP.L2_QUALITY_W * quality)
 
 
+def _hand_pokemon_value(player: dict) -> float:
+    """② Sum of L1 card values of Pokemon in this player's VISIBLE hand.
+
+    Returns 0 when the hand is hidden (opponent seat: only handCount is known), so
+    the term is effectively one-sided toward whichever seat's hand is revealed.
+    """
+    hand = player.get("hand")
+    if not isinstance(hand, list):
+        return 0.0
+    db = get_db()
+    return sum(db.pokemon_value(c.get("id")) for c in hand if isinstance(c, dict))
+
+
+def _hand_pokemon_count(player: dict) -> int:
+    """② control: how many Pokemon sit in this player's VISIBLE hand."""
+    hand = player.get("hand")
+    if not isinstance(hand, list):
+        return 0
+    db = get_db()
+    return sum(1 for c in hand if isinstance(c, dict) and db.is_pokemon(c.get("id")))
+
+
+def _hand_value_split(player: dict) -> tuple[float, float]:
+    """②' (basic_value, evolution_value) of the VISIBLE hand.
+
+    Basics are deployable now (asset); evolution cards may be the stuck-in-hand
+    loss symptom the ③ outcome regression flagged. Split so each can be weighed
+    (even with opposite signs) independently.
+    """
+    hand = player.get("hand")
+    if not isinstance(hand, list):
+        return 0.0, 0.0
+    db = get_db()
+    basic = evo = 0.0
+    for c in hand:
+        if not isinstance(c, dict):
+            continue
+        cid = c.get("id")
+        v = db.pokemon_value(cid)
+        if v <= 0:
+            continue
+        if db.stage_of(cid) == 0:
+            basic += v
+        else:
+            evo += v
+    return basic, evo
+
+
+# --- ⑦ role/"利き" terms (OFF unless config.ROLE_W > 0) --------------------------
+
+def _threat_on(att: dict | None, dfn: dict | None) -> float:
+    """How hard `att` threatens `dfn` RIGHT AT THE SPOT: best type-aware damage
+    over the defender's remaining hp, capped (overkill is not extra value)."""
+    if att is None or dfn is None:
+        return 0.0
+    db = get_db()
+    best = 0
+    for ai in db.attacks_of(att.get("id")):
+        dmg = attack_damage_estimate(att.get("id"), dfn.get("id"), ai.damage)
+        if dmg > best:
+            best = dmg
+    return min(best / max(dfn.get("hp") or 1, 1), 1.5)
+
+
+def _bench_eki(player: dict) -> float:
+    """Bench "利き": utility the bench projects (abilities + charged backups)."""
+    db = get_db()
+    s = 0.0
+    for p in (player.get("bench") or []):
+        if not isinstance(p, dict):
+            continue
+        c = db.card(p.get("id"))
+        if c is None:
+            continue
+        if c.skills:
+            s += 1.0
+        s += min(total_energy(p), 3) / 3.0 * 0.5
+    return s
+
+
+def _role_terms(mp: dict, op: dict) -> float:
+    my_act, op_act = active_of(mp), active_of(op)
+    threat_diff = _threat_on(my_act, op_act) - _threat_on(op_act, my_act)
+    bench_diff = (_bench_eki(mp) - _bench_eki(op)) / 4.0
+    return 0.6 * threat_diff + 0.4 * bench_diff
+
+
+# --- ⑨ bad shapes (OFF unless config.BAD_SHAPE_W > 0) ----------------------------
+# Inner mix 0.8 : 1.0 comes from the regression coefficients (-0.105 vs -0.132).
+
+def _bad_shapes(pl: dict) -> float:
+    db = get_db()
+    chip_fragile = 0
+    for p in in_play(pl):
+        mx = p.get("maxHp") or 0
+        dmg = mx - (p.get("hp") or mx)
+        if dmg > 0 and mx <= 90:
+            chip_fragile += 1
+    bound = 0.0
+    act = active_of(pl)
+    if act is not None:
+        c = db.card(act.get("id"))
+        if c is not None and len(act.get("energies") or []) == 0 and (c.retreatCost or 0) >= 2:
+            bound = 1.0
+    return 0.8 * chip_fragile + 1.0 * bound
+
+
+# --- ⑧ anti-stall axis (OFF unless config.ANTI_STALL_W > 0) ----------------------
+
+_STALL_NAMES = frozenset({"Crustle", "Dwebble", "Walrein", "Spheal"})
+_BREAKER_NAMES = frozenset({"Dusknoir", "Dusclops", "Duskull", "Munkidori"})
+_ids_cache: dict[frozenset, frozenset] = {}
+
+
+def _ids_by_name(names: frozenset) -> frozenset:
+    got = _ids_cache.get(names)
+    if got is None:
+        db = get_db()
+        got = frozenset(cid for cid, c in db.all_cards().items() if c.name in names)
+        _ids_cache[names] = got
+    return got
+
+
+def _anti_stall(mp: dict, op: dict) -> float:
+    """Bonus for holding stall-breakers once the opponent reveals a stall line."""
+    stall = _ids_by_name(_STALL_NAMES)
+    revealed = [p.get("id") for p in in_play(op) if isinstance(p, dict)]
+    revealed += [c.get("id") for c in (op.get("discard") or []) if isinstance(c, dict)]
+    if not any(cid in stall for cid in revealed):
+        return 0.0
+    breakers = _ids_by_name(_BREAKER_NAMES)
+    mine = sum(1 for p in in_play(mp) if isinstance(p, dict) and p.get("id") in breakers)
+    return min(mine, 3) / 3.0
+
+
 def _energy_on_attackers(player: dict) -> int:
     return sum(total_energy(p) for p in in_play(player))
 
 
-def evaluate(state: dict, me: int | None = None, l2_w: float | None = None) -> float:
+def evaluate(state: dict, me: int | None = None, l2_w: float | None = None,
+             hand_value_w: float | None = None, hand_count_w: float | None = None,
+             hand_basic_w: float | None = None, hand_evo_w: float | None = None,
+             role_w: float | None = None, anti_stall_w: float | None = None,
+             bad_shape_w: float | None = None) -> float:
     """Value of `state` for player `me` (defaults to state.yourIndex).
 
     `l2_w` gates the L2 dynamic terms; None falls back to eval_params.L2_W.
-    Passed explicitly by make_leaf_evaluator so config-sweeps can vary it.
+    `hand_value_w`/`hand_count_w` gate the ② hand terms, `role_w` the ⑦
+    role/"利き" terms, `anti_stall_w` the ⑧ axis (None/0 = OFF, byte-identical).
+    All passed explicitly by make_leaf_evaluator so config-sweeps can vary them.
     """
     if state is None:
         return 0.0
@@ -154,6 +295,27 @@ def evaluate(state: dict, me: int | None = None, l2_w: float | None = None) -> f
     w2 = 0.0 if l2_w is None else l2_w  # gate owned by config.L2_W (via caller)
     if w2 > 0:  # L2 dynamic terms (attack distance / KO threat / L1 quality)
         score += w2 * _l2_terms(mp, op)
+    hw = 0.0 if hand_value_w is None else hand_value_w  # ② gate (config.HAND_VALUE_W)
+    if hw != 0:  # credit deployable Pokemon held in hand (visible seat only)
+        score += hw * (_hand_pokemon_value(mp) - _hand_pokemon_value(op)) / 800.0
+    hcw = 0.0 if hand_count_w is None else hand_count_w  # ② count control
+    if hcw != 0:
+        score += hcw * (_hand_pokemon_count(mp) - _hand_pokemon_count(op)) / 6.0
+    hbw = 0.0 if hand_basic_w is None else hand_basic_w  # ②' deployable basics
+    hew = 0.0 if hand_evo_w is None else hand_evo_w      # ②' stuck evolutions
+    if hbw != 0 or hew != 0:
+        mb, mev = _hand_value_split(mp)
+        ob, oev = _hand_value_split(op)
+        score += hbw * (mb - ob) / 800.0 + hew * (mev - oev) / 800.0
+    rw = 0.0 if role_w is None else role_w  # ⑦ gate (config.ROLE_W)
+    if rw != 0:
+        score += rw * _role_terms(mp, op)
+    asw = 0.0 if anti_stall_w is None else anti_stall_w  # ⑧ gate (config.ANTI_STALL_W)
+    if asw != 0:
+        score += asw * (_anti_stall(mp, op) - _anti_stall(op, mp))
+    bsw = 0.0 if bad_shape_w is None else bad_shape_w  # ⑨ gate (config.BAD_SHAPE_W)
+    if bsw != 0:  # penalize OUR bad shapes, credit the opponent's
+        score -= bsw * (_bad_shapes(mp) - _bad_shapes(op))
     # squash into [-1, 1]
     return max(-1.0, min(1.0, score / 3.0))
 

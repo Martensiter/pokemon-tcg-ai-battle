@@ -40,12 +40,16 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--min-size", type=int, default=5000,
                     help="skip raw json files smaller than this bytes "
                          "(filters incomplete games that never started)")
-    ap.add_argument("--features", choices=("v1", "v2"), default="v1",
+    ap.add_argument("--features", choices=("v1", "v2", "all"), default="v1",
                     help="feature version: v1 = FEATURE_DIM baseline, "
-                         "v2 = +L1/L2 tactical extras (FEATURE_DIM_V2)")
+                         "v2 = +L1/L2 tactical extras (FEATURE_DIM_V2), "
+                         "all = MAXIMAL superset (FEATURE_DIM_ALL, slice subsets later)")
     args = ap.parse_args(argv)
 
-    if args.features == "v2":
+    if args.features == "all":
+        from agent.features import extract_all, FEATURE_DIM_ALL
+        extractor, feature_dim = extract_all, FEATURE_DIM_ALL
+    elif args.features == "v2":
         from agent.features import extract_v2, FEATURE_DIM_V2
         extractor, feature_dim = extract_v2, FEATURE_DIM_V2
     else:

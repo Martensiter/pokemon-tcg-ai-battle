@@ -19,7 +19,7 @@ import random
 
 from cg import api
 from cg.sim import lib
-from cg.api import to_observation_class, SelectContext
+from cg.api import SelectContext
 
 from . import config as C
 from .determinize import determinize
@@ -36,6 +36,40 @@ def _step_dict(search_id: int, select: list[int]) -> dict:
     if d["error"] != 0:
         raise RuntimeError(f"search_step error {d['error']}")
     return d["state"]  # {"observation": {...}, "searchId": int}
+
+
+def _begin_lean(obs: dict, det) -> int:
+    """SearchBegin without the dataclass round-trip.
+
+    api.search_begin() converts the full root state into nested dataclasses
+    (~14s/game profiled) but the search loop only ever uses ``searchId``.
+    Same engine call, same error semantics (raises -> caught per-sim), raw
+    dict parsing only. The engine agent pointer is created lazily exactly as
+    the api module does.
+    """
+    if not hasattr(api, "agent_ptr"):
+        api.agent_ptr = lib.AgentStart()
+    sbi = obs.get("search_begin_input")
+    if not sbi:
+        raise RuntimeError("no search_begin_input on observation")
+    state = obs["current"]
+    yi = state["yourIndex"]
+    your_deck = [] if (obs.get("select") or {}).get("deck") is not None else det.your_deck
+    opp_active_list = (state["players"][1 - yi].get("active") or [])
+    opp_active = det.opponent_active if (opp_active_list and opp_active_list[0] is None) else []
+    bs = lib.SearchBegin(
+        api.agent_ptr, sbi.encode("ascii"), len(sbi),
+        (ctypes.c_int * len(your_deck))(*your_deck),
+        (ctypes.c_int * len(det.your_prize))(*det.your_prize),
+        (ctypes.c_int * len(det.opponent_deck))(*det.opponent_deck),
+        (ctypes.c_int * len(det.opponent_prize))(*det.opponent_prize),
+        (ctypes.c_int * len(det.opponent_hand))(*det.opponent_hand),
+        (ctypes.c_int * len(opp_active))(*opp_active),
+        0)
+    d = json.loads(bs)
+    if d["error"] != 0:
+        raise RuntimeError(f"search_begin error {d['error']}")
+    return d["state"]["searchId"]
 
 
 def terminal_value(state: dict, me: int) -> float:
@@ -193,7 +227,6 @@ class MCTS:
     def search(self, obs: dict, candidates: list[list[int]]) -> list[int]:
         """Return the best selection among `candidates` for a single-select decision."""
         me = obs["current"]["yourIndex"]
-        agent_obs = to_observation_class(obs)
         n = len(candidates)
         visits = [0] * n
         values = [0.0] * n
@@ -215,12 +248,8 @@ class MCTS:
                       if priors is not None else self._ucb_select(visits, values, sims))
                 try:
                     det = determinize(obs, self.deck, self.rng)
-                    root = api.search_begin(
-                        agent_obs, det.your_deck, det.your_prize,
-                        det.opponent_deck, det.opponent_prize, det.opponent_hand,
-                        det.opponent_active, manual_coin=False,
-                    )
-                    state = _step_dict(root.searchId, candidates[ci])
+                    sid = _begin_lean(obs, det)
+                    state = _step_dict(sid, candidates[ci])
                     val = self._rollout(state, me)
                 except Exception:
                     fails += 1

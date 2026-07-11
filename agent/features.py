@@ -213,6 +213,38 @@ def _kos_to_win(pl: dict, other: dict) -> float:
     return -(-left // max(per, 1))  # ceil division
 
 
+# --- ①-isolation: L1 card-value features ONLY (ablation of extract_v2) ---------
+# extract_v2 bundles 15 dims (attack distance, KO-now, mobility, KO-race, finish
+# flags AND the L1 card values). To test hypothesis ① in isolation we append ONLY
+# the 4 L1 card-value columns (self+opp active/bench), matching exactly the slice
+# value_data_*_l1only.npz = value_data_*_v2.npz[:, [0..116, 120,121,126,127]].
+_L1ONLY_PLAYER_EXTRAS = 2
+FEATURE_DIM_L1 = FEATURE_DIM + 2 * _L1ONLY_PLAYER_EXTRAS  # 117 + 4 = 121
+
+
+def _l1_player_extras(pl: dict, out: list) -> None:
+    from .cards import get_db
+    db = get_db()
+    act = active_of(pl)
+    out.append((db.pokemon_value(act.get("id")) if act else 0.0) / 400.0)   # L1: battle spot
+    bench_v = sum(db.pokemon_value(p.get("id")) for p in (pl.get("bench") or [])
+                  if isinstance(p, dict))
+    out.append(min(bench_v, 1200.0) / 1200.0)                                # L1: bench quality
+
+
+def extract_l1only(state: dict, me: int) -> np.ndarray:
+    """v1 features + ONLY the L1 card-value columns (hypothesis ① in isolation)."""
+    if state is None:
+        return np.zeros(FEATURE_DIM_L1, dtype=np.float32)
+    base = extract(state, me)
+    mp = state["players"][me]
+    op = state["players"][1 - me]
+    out: list = []
+    _l1_player_extras(mp, out)   # -> cols matching v2[120],v2[121]
+    _l1_player_extras(op, out)   # -> cols matching v2[126],v2[127]
+    return np.concatenate([base, np.asarray(out, dtype=np.float32)])
+
+
 def extract_v2(state: dict, me: int) -> np.ndarray:
     """v1 features + L1/L2 tactical extras (attack distance, KO race, quality)."""
     if state is None:
@@ -241,3 +273,59 @@ def extract_v2(state: dict, me: int) -> np.ndarray:
     out.append(1.0 if my_finish else 0.0)
     out.append(1.0 if op_finish else 0.0)
     return np.concatenate([base, np.asarray(out, dtype=np.float32)])
+
+
+# --- ablation slices of extract_v2 (bundle-poison hunt) ------------------------
+# The 132d bundle lost ~12pt vs the ①-only slice; these isolate the remaining
+# sub-groups to find which one poisoned it. Built by SLICING extract_v2 output
+# directly (no reimplementation -> no train/inference mismatch possible).
+TEMPO_COLS = [117, 118, 119, 123, 124, 125]  # ⑤⑥ attack dist / dmg-now / KO-now (both seats)
+RACE_COLS = [129, 130, 131]                  # ④ KO-race diff + finish flags
+MOB_COLS = [122, 128]                        # active mobility (energy - retreat)
+
+
+def _sliced_v2(extra_cols):
+    def f(state, me):
+        v = extract_v2(state, me)
+        return np.concatenate([v[:FEATURE_DIM], v[extra_cols]])
+    return f
+
+
+extract_tempo = _sliced_v2(TEMPO_COLS)
+extract_race = _sliced_v2(RACE_COLS)
+extract_mob = _sliced_v2(MOB_COLS)
+FEATURE_DIM_TEMPO = FEATURE_DIM + len(TEMPO_COLS)  # 123
+FEATURE_DIM_RACE = FEATURE_DIM + len(RACE_COLS)    # 120
+FEATURE_DIM_MOB = FEATURE_DIM + len(MOB_COLS)      # 119
+
+
+# --- MAXIMAL extractor: superset of candidate features for the kitchen-sink -----
+# One wide vector so a SINGLE champion-data extraction supports slicing ANY subset
+# later (the l1only trick). Layout: cols 0..131 == extract_v2 (①L1 board, ⑤attack
+# distance, ⑥KO-now, ⑦battle/bench split, ④kos-race/finish); cols 132/133 add
+# ② hand-Pokemon-value (self visible hand / opp hand usually hidden -> 0). New
+# feature ideas append here so v2/v1 slices stay stable prefixes.
+_ALL_EXTRA = 2
+FEATURE_DIM_ALL = FEATURE_DIM_V2 + _ALL_EXTRA  # 132 + 2 = 134
+
+
+def _hand_value_feat(pl: dict) -> float:
+    """② normalized L1 card-value of Pokemon in this player's visible hand."""
+    hand = pl.get("hand")
+    if not isinstance(hand, list):
+        return 0.0
+    from .cards import get_db
+    db = get_db()
+    hv = sum(db.pokemon_value(c.get("id")) for c in hand if isinstance(c, dict))
+    return min(hv, 1200.0) / 1200.0
+
+
+def extract_all(state: dict, me: int) -> np.ndarray:
+    """extract_v2 columns ++ ② hand-Pokemon-value (self, opp). Slice for subsets."""
+    if state is None:
+        return np.zeros(FEATURE_DIM_ALL, dtype=np.float32)
+    base = extract_v2(state, me)
+    mp = state["players"][me]
+    op = state["players"][1 - me]
+    extra = np.asarray([_hand_value_feat(mp), _hand_value_feat(op)], dtype=np.float32)
+    return np.concatenate([base, extra])

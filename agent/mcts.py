@@ -17,6 +17,17 @@ import time
 import ctypes
 import random
 
+# Optional fast JSON: raw state parsing is ~40% of search wall-time. orjson is
+# vendored into the submission bundle (dual-ABI .so, see make_submission
+# --extra-dir); stdlib json is the always-works fallback, so a missing/broken
+# wheel costs speed, never correctness.
+try:
+    import orjson as _fastjson
+    _loads = _fastjson.loads
+except ImportError:  # pragma: no cover - environment-dependent
+    _fastjson = None
+    _loads = json.loads
+
 from cg import api
 from cg.sim import lib
 from cg.api import SelectContext
@@ -32,7 +43,7 @@ def _step_dict(search_id: int, select: list[int]) -> dict:
     """Advance a search state, returning the raw dict (skips dataclass parsing)."""
     arr = (ctypes.c_int * len(select))(*select)
     js = lib.SearchStep(api.agent_ptr, search_id, arr, len(select))
-    d = json.loads(js)
+    d = _loads(js)
     if d["error"] != 0:
         raise RuntimeError(f"search_step error {d['error']}")
     return d["state"]  # {"observation": {...}, "searchId": int}
@@ -66,7 +77,7 @@ def _begin_lean(obs: dict, det) -> int:
         (ctypes.c_int * len(det.opponent_hand))(*det.opponent_hand),
         (ctypes.c_int * len(opp_active))(*opp_active),
         0)
-    d = json.loads(bs)
+    d = _loads(bs)
     if d["error"] != 0:
         raise RuntimeError(f"search_begin error {d['error']}")
     return d["state"]["searchId"]

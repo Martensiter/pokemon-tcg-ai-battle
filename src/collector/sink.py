@@ -165,7 +165,7 @@ class KaggleDatasetSink(Sink):
         if self._log is not None:
             from .logutil import log_kv
             log_kv(self._log, "publish", ok=ok, slug=self.dataset_slug,
-                   msg=(err.strip()[:200] if not ok else out.strip()[:120]))
+                   detail=(err.strip()[:200] if not ok else out.strip()[:120]))
         return ok
 
 

@@ -79,7 +79,8 @@ cat ~/.openclaw/cron/jobs.json | python3 -m json.tool | grep -iE '"name"|every|r
 ### cronジョブ（OpenClaw Control UI = 192.168.1.108:18789 の「Cron ジョブ」）
 - `ptcg-collect` … every 30m → `run.sh -m collector --once --rps 0.5`
 - `ptcg-daily` … `0 4 * * *` UTC → `run.sh tools/daily_pipeline.py --publish`
-- どちらも isolated / tools=exec(elevated)。**結果配信はDiscord宛てでエラーになるので delivery=none に変更すること（未対応・要掃除）**。
+- どちらも isolated / tools=exec、model は `nvidia/meta-llama/llama-4-scout-17b-16e-instruct`（Groq無料枠で唯一TPMが足りる。詳細は HUB.md §3）。elevated は使わない（exec は host=gateway 設定で常時ネットワーク可。boolean引数は弱いモデルが型を壊すので禁止）。
+- 配信は none + best-effort 設定済み（2026-07-13）。Discord宛て配信エラーの掃除は完了。
 
 ### リセット後の復帰
 基本「何もしなくていい」。cronが永続→自動で `run.sh` 実行→`run.sh` が永続venvで動く。

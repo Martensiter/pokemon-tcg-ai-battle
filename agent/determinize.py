@@ -52,7 +52,8 @@ def _visible_mine(player: dict) -> Counter:
     return vis
 
 
-def determinize(obs: dict, my_deck_ids: list[int], rng: random.Random) -> Determinization:
+def determinize(obs: dict, my_deck_ids: list[int], rng: random.Random,
+                arch_prior: float = 0.0) -> Determinization:
     db = get_db()
     st = obs["current"]
     me = st["yourIndex"]
@@ -76,14 +77,36 @@ def determinize(obs: dict, my_deck_ids: list[int], rng: random.Random) -> Determ
         your_prize.append(c["id"] if c is not None else pool.pop())
     your_deck = pool[:need_deck]
 
-    # ---- opponent hidden cards: sample from a mirror-like prior ----
+    # ---- opponent hidden cards ----
     facedown_active = bool(op.get("active") and op["active"][0] is None)
     need_opp = op.get("deckCount", 0) + len(op.get("prize") or []) + op.get("handCount", 0) \
         + (1 if facedown_active else 0)
-    template = list(my_deck_ids)
-    reps = need_opp // len(template) + 1 if template else 1
-    opp_pool = (template * reps)[:need_opp]
-    rng.shuffle(opp_pool)
+
+    # Archetype prior (OPT-IN, fork roadmap (c)): match the opponent's visible
+    # cards against mined meta archetypes and sample their hidden cards from
+    # the matched list MINUS what we have already seen. No confident match
+    # (early game, off-meta deck) -> mirror prior below, byte-identical.
+    opp_pool = None
+    arch_basic = 0
+    if arch_prior > 0:
+        from . import arch_prior as _ap
+        vis_op = _visible_mine(op)
+        m = _ap.match(vis_op)
+        if m is not None:
+            _, arch_deck, arch_basic = m
+            remain = list((Counter(arch_deck) - vis_op).elements())
+            rng.shuffle(remain)
+            while len(remain) < need_opp:      # observed cards outside the list etc.
+                pad = list(arch_deck)
+                rng.shuffle(pad)
+                remain.extend(pad)
+            opp_pool = remain[:need_opp]
+
+    if opp_pool is None:                       # mirror prior (stock behavior)
+        template = list(my_deck_ids)
+        reps = need_opp // len(template) + 1 if template else 1
+        opp_pool = (template * reps)[:need_opp]
+        rng.shuffle(opp_pool)
 
     d = op.get("deckCount", 0)
     opponent_deck = opp_pool[:d]
@@ -95,7 +118,7 @@ def determinize(obs: dict, my_deck_ids: list[int], rng: random.Random) -> Determ
     rest = rest[pc:]
     hc = op.get("handCount", 0)
     opponent_hand = rest[:hc]
-    opponent_active = [_FALLBACK_BASIC] if facedown_active else []
+    opponent_active = [arch_basic or _FALLBACK_BASIC] if facedown_active else []
 
     return Determinization(
         your_deck=your_deck,

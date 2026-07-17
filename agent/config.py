@@ -131,3 +131,12 @@ ROLLOUT_POLICY_C = float(os.environ.get("PTCG_ROLLOUT_POLICY_C", "0.0"))
 # (default): no prior, no behavior change. Tune (e.g. 1.0-3.0) + verify on the
 # engine machine before shipping. Env override: PTCG_POLICY_PUCT_C.
 POLICY_PUCT_C = float(os.environ.get("PTCG_POLICY_PUCT_C", "0.0"))
+
+# --- ② archetype-aware opponent determinization (fork roadmap (c)), OPT-IN ----
+# The stock determinizer models the opponent's hidden cards with a MIRROR prior
+# ("assume they run OUR deck" -- WRITEUP.md, unfinished item (c)). With this ON,
+# their visible cards (board/discard/face-up prizes) are matched against mined
+# meta archetypes (agent/archetypes.json) and hidden deck/hand/prizes are
+# sampled from the matched list minus what is already visible; no confident
+# match (early game / off-meta) -> mirror fallback. 0 = OFF (byte-identical).
+ARCH_PRIOR = float(os.environ.get("PTCG_ARCH_PRIOR", "0.0"))

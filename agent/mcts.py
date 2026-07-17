@@ -131,6 +131,9 @@ class MCTS:
         self.rollout_c = float(getattr(cfg, "ROLLOUT_POLICY_C", 0.0) or 0.0)
         self.rollout_policy = (PolicyNet.maybe_load(getattr(cfg, "POLICY_PATH", ""))
                                if self.rollout_c > 0 else None)
+        # Opt-in archetype-aware opponent prior for determinization. 0 = OFF ->
+        # stock mirror prior, byte-identical (agent/determinize.py).
+        self.arch_prior = float(getattr(cfg, "ARCH_PRIOR", 0.0) or 0.0)
 
     # ---- rollout ----
     def _rollout_choose(self, obs: dict) -> list[int]:
@@ -258,7 +261,7 @@ class MCTS:
                 ci = (puct_select(visits, values, priors, prior_c)
                       if priors is not None else self._ucb_select(visits, values, sims))
                 try:
-                    det = determinize(obs, self.deck, self.rng)
+                    det = determinize(obs, self.deck, self.rng, arch_prior=self.arch_prior)
                     sid = _begin_lean(obs, det)
                     state = _step_dict(sid, candidates[ci])
                     val = self._rollout(state, me)

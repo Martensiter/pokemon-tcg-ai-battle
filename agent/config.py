@@ -20,7 +20,10 @@ MAX_SIMULATIONS = int(os.environ.get("PTCG_MAX_SIMS", "400"))
 MIN_SIMULATIONS = 8
 
 # Truncated-rollout depth (number of decisions simulated before leaf eval).
-ROLLOUT_DEPTH = int(os.environ.get("PTCG_ROLLOUT_DEPTH", "24"))
+# 24 -> 36 (2026-07-18): rollout-depth dose curve 0/8/24/36/48 showed depth is
+# the agent's real evaluator (depth-0 collapses to 5%); 36 beats 24 at 58.0%
+# (n=288, p=0.007) with sims still in the saturated zone. 48 = 56.4% (diminishing).
+ROLLOUT_DEPTH = int(os.environ.get("PTCG_ROLLOUT_DEPTH", "36"))
 
 # Exploration constant for UCB1 at the root.
 UCB_C = 1.4

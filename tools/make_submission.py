@@ -52,6 +52,7 @@ def _copytree(src, dst):
 
 
 def build(deck_file: str, name: str, engine_so: str | None = None,
+          extra_dirs: list[str] | None = None,
           allow_missing_engine: bool = False):
     out = os.path.join(ROOT, f"submission_{name}")
     if os.path.exists(out):
@@ -79,6 +80,16 @@ def build(deck_file: str, name: str, engine_so: str | None = None,
             raise SystemExit(f"--engine-so not found: {engine_so}")
         os.makedirs(os.path.dirname(engine_dst), exist_ok=True)
         shutil.copy2(engine_so, engine_dst)
+    for xd in (extra_dirs or []):
+        # vendor trees (e.g. orjson dual-ABI wheels) land at the bundle root so
+        # `import orjson` resolves from main.py sys.path[0]
+        for child in os.listdir(xd):
+            s = os.path.join(xd, child)
+            d = os.path.join(out, child)
+            if os.path.isdir(s):
+                _copytree(s, d)
+            else:
+                shutil.copy2(s, d)
     kind = _engine_kind(engine_dst)
     if kind == "missing":
         if not allow_missing_engine:
@@ -129,12 +140,14 @@ def main():
                     help="path to the LINUX x86_64 libcg.so to bundle as cg/libcg.so "
                          "(e.g. sample_submission/cg/libcg.so). Defaults to the repo's "
                          "cg/libcg.so; required if that is absent or the wrong arch.")
+    ap.add_argument("--extra-dir", action="append", default=[],
+                    help="copy directory contents into the bundle root (repeatable)")
     ap.add_argument("--allow-missing-engine", action="store_true",
                     help="build even without the engine binary (for inspection; "
                          "the resulting bundle WILL crash on Kaggle).")
     args = ap.parse_args()
     build(args.deck, args.name, engine_so=args.engine_so,
-          allow_missing_engine=args.allow_missing_engine)
+          allow_missing_engine=args.allow_missing_engine, extra_dirs=args.extra_dir)
 
 
 if __name__ == "__main__":

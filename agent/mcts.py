@@ -134,6 +134,11 @@ class MCTS:
         # Opt-in archetype-aware opponent prior for determinization. 0 = OFF ->
         # stock mirror prior, byte-identical (agent/determinize.py).
         self.arch_prior = float(getattr(cfg, "ARCH_PRIOR", 0.0) or 0.0)
+        # Opt-in behavioral-cloning ROOT prior via torch model (gate-2 test). 0 =
+        # OFF -> _bc_priors never called, torch never imported, baseline unchanged.
+        self.bc_c = float(getattr(cfg, "BC_PRIOR_C", 0.0) or 0.0)
+        self.bc_path = getattr(cfg, "BC_MODEL_PATH", "")
+        self.bc_temp = float(getattr(cfg, "BC_PRIOR_TEMP", 1.0) or 1.0)
 
     # ---- rollout ----
     def _rollout_choose(self, obs: dict) -> list[int]:
@@ -218,6 +223,28 @@ class MCTS:
         except Exception:
             return None
 
+    def _bc_priors(self, obs: dict, candidates: list[list[int]]):
+        """Root prior from the trained BC model (gate-2). Same contract as
+        _policy_priors. torch loads lazily inside scratchpad.bc_infer."""
+        try:
+            import sys, os
+            sp = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scratchpad")
+            if sp not in sys.path:
+                sys.path.insert(0, sp)
+            import bc_infer
+            probs = bc_infer.option_priors(obs, self.bc_path, temp=self.bc_temp)
+            if probs is None:
+                return None
+            out = [float(probs[c[0]]) if (len(c) == 1 and 0 <= c[0] < len(probs)) else None
+                   for c in candidates]
+            known = [p for p in out if p is not None]
+            fill = (sum(known) / len(known)) if known else 1.0
+            out = [p if p is not None else fill for p in out]
+            s = sum(out)
+            return [p / s for p in out] if s > 0 else None
+        except Exception:
+            return None
+
     def _heuristic_priors(self, obs: dict, candidates: list[list[int]]):
         """Prior over `candidates` from the fast option scorer (L3), or None.
 
@@ -248,7 +275,9 @@ class MCTS:
         # Root prior over the candidates: policy net first (when loaded), then the
         # heuristic option scorer (when enabled); both unusable -> plain UCB1.
         priors, prior_c = None, 0.0
-        if self.policy is not None:
+        if self.bc_c > 0:
+            priors, prior_c = self._bc_priors(obs, candidates), self.bc_c
+        if priors is None and self.policy is not None:
             priors, prior_c = self._policy_priors(obs, candidates), self.puct_c
         if priors is None and self.heur_c > 0:
             priors, prior_c = self._heuristic_priors(obs, candidates), self.heur_c

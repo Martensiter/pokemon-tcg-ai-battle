@@ -140,3 +140,13 @@ POLICY_PUCT_C = float(os.environ.get("PTCG_POLICY_PUCT_C", "0.0"))
 # sampled from the matched list minus what is already visible; no confident
 # match (early game / off-meta) -> mirror fallback. 0 = OFF (byte-identical).
 ARCH_PRIOR = float(os.environ.get("PTCG_ARCH_PRIOR", "0.0"))
+
+# --- BC root prior (gate-2: trained torch model as MCTS root prior), OPT-IN ----
+# The behavioral-cloning net (bc_v1.pt, trained on official top-player games)
+# steers root simulations via PUCT. torch is imported lazily inside
+# scratchpad/bc_infer only when BC_PRIOR_C > 0, so the default agent (0.0) never
+# imports torch and is byte-identical to baseline. For local gate-2 A/B only;
+# shipping needs a numpy port or torch vendored in the bundle.
+BC_PRIOR_C = float(os.environ.get("PTCG_BC_PRIOR_C", "0.0"))
+BC_PRIOR_TEMP = float(os.environ.get("PTCG_BC_PRIOR_TEMP", "1.0"))
+BC_MODEL_PATH = os.environ.get("PTCG_BC_MODEL_PATH", "")
